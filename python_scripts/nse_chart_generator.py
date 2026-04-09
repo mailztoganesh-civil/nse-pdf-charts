@@ -5,6 +5,8 @@ Used by the web app backend (called via CLI with progress JSON on stdout).
 """
 
 import os, sys, json, time, random, logging, requests, zipfile, argparse
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+import threading, multiprocessing
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -36,8 +38,12 @@ CONFIG = {
     "batch_delay_sec" : 1,
     "retry_attempts"  : 2,
     "retry_delay_sec" : 5,
-    "chart_dpi"       : 120,
+    "chart_dpi"       : 100,
+    "render_workers"  : 6,   # parallel chart renders
 }
+
+# Lock for matplotlib pyplot global state (figure creation/closing)
+_plt_lock = threading.Lock()
 
 MS = {
     # ── TradingView Light Theme (matches user's screenshot) ─────────────────
@@ -247,8 +253,9 @@ def draw_chart(symbol, name, df, nifty_df=None, screener_dates=None):
     FONT     = 'DejaVu Sans'
     FONT_MONO= 'DejaVu Sans Mono'
 
-    # ── Figure: 2 panels, TradingView dark background ──────────────────────
-    fig = plt.figure(figsize=(22, 11), dpi=CONFIG["chart_dpi"], facecolor=MS["bg"])
+    # ── Figure: 2 panels, TradingView light background ─────────────────────
+    with _plt_lock:
+        fig = plt.figure(figsize=(18, 9), dpi=CONFIG["chart_dpi"], facecolor=MS["bg"])
     gs  = fig.add_gridspec(
         2, 1, hspace=0.0,
         left=0.01, right=0.915, top=0.905, bottom=0.065,
@@ -462,9 +469,10 @@ def draw_chart(symbol, name, df, nifty_df=None, screener_dates=None):
              color=MS["text_sec"], fontsize=8.5, ha='right', fontfamily=FONT, va='center')
 
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=CONFIG["chart_dpi"],
-                bbox_inches='tight', facecolor=MS["bg"])
-    plt.close()
+    with _plt_lock:
+        fig.savefig(buf, format='png', dpi=CONFIG["chart_dpi"],
+                    bbox_inches='tight', facecolor=MS["bg"])
+        plt.close(fig)
     buf.seek(0)
     return buf
 
@@ -529,6 +537,36 @@ def build_pdf(chart_data, output_path, label="NSE Stock Charts"):
     doc.build(story, onFirstPage=add_bg, onLaterPages=add_bg)
 
 
+def _render_worker(args):
+    """
+    Module-level worker for ProcessPoolExecutor — must be picklable.
+    Receives raw data, returns (status, sym_yf, sym_nse, name, img_bytes, stats_or_None).
+    """
+    sym_yf, sym_nse, name, df_dict, nifty_dict, s_dates = args
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        df      = pd.DataFrame(df_dict)
+        df.index = pd.to_datetime(df.index)
+        nifty_df = None
+        if nifty_dict:
+            nifty_df = pd.DataFrame(nifty_dict)
+            nifty_df.index = pd.to_datetime(nifty_df.index)
+        closes = df['Close'].values.astype(float)
+        highs  = df['High'].values.astype(float)
+        lows   = df['Low'].values.astype(float)
+        chg_pct = ((closes[-1] - closes[0]) / closes[0]) * 100
+        buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df, screener_dates=s_dates)
+        return ("ok", sym_yf, sym_nse, name, buf.read(), {
+            "last_close": round(float(closes[-1]), 2),
+            "chg_pct"   : round(chg_pct, 2),
+            "high_52w"  : round(float(highs.max()), 2),
+            "low_52w"   : round(float(lows.min()), 2),
+        })
+    except Exception as exc:
+        return ("error", sym_yf, sym_nse, name, None, str(exc))
+
+
 def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stock Charts",
                  sym_screener_dates=None):
     """
@@ -561,52 +599,69 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
     except Exception:
         pass  # RS line will be skipped if NIFTY unavailable
 
+    # ── Step 1: fetch all OHLCV data in batches ─────────────────────────────
+    all_data = {}  # sym_yf -> DataFrame
     batches = [symbol_list[i:i+CONFIG["batch_size"]]
                for i in range(0, len(symbol_list), CONFIG["batch_size"])]
 
+    emit({"type": "progress", "done": 0, "total": total, "message": "Downloading price data..."})
     for b_idx, batch in enumerate(batches):
         sym_yf_list = [s[0] for s in batch]
-        sym_map     = {s[0]: (s[1], s[2]) for s in batch}
-
         data = fetch_batch(sym_yf_list, history_months)
+        all_data.update(data)
+        if b_idx < len(batches) - 1:
+            time.sleep(CONFIG["batch_delay_sec"] + random.uniform(0, 1))
 
-        for sym_yf, (sym_nse, name) in sym_map.items():
+    emit({"type": "progress", "done": 0, "total": total, "message": "Rendering charts..."})
+
+    # ── Step 2: render all charts in parallel (processes bypass GIL) ─────────
+    nifty_dict = nifty_df.to_dict() if nifty_df is not None else None
+    n_workers  = min(CONFIG["render_workers"], max(1, len(symbol_list)))
+
+    worker_args = []
+    no_data_syms = []
+    for sym_yf, sym_nse, name in symbol_list:
+        if sym_yf not in all_data or all_data[sym_yf].empty:
+            no_data_syms.append((sym_yf, sym_nse, name))
+            continue
+        df = all_data[sym_yf]
+        s_dates = (sym_screener_dates or {}).get(sym_nse) or \
+                  (sym_screener_dates or {}).get(sym_yf)
+        worker_args.append((sym_yf, sym_nse, name, df.to_dict(), nifty_dict, s_dates))
+
+    for sym_yf, sym_nse, name in no_data_syms:
+        done += 1
+        failed.append((sym_yf, sym_nse, name))
+        emit({"type": "progress", "done": done, "total": total,
+              "message": f"No data: {sym_nse}", "symbol": sym_nse})
+
+    results_map = {}
+    with ProcessPoolExecutor(max_workers=n_workers) as pool:
+        futures = {pool.submit(_render_worker, a): a for a in worker_args}
+        for fut in as_completed(futures):
+            status, sym_yf, sym_nse, name, img_bytes, extra = fut.result()
             done += 1
-            if sym_yf not in data or data[sym_yf].empty:
-                failed.append((sym_yf, sym_nse, name))
-                emit({"type": "progress", "done": done, "total": total,
-                      "message": f"No data: {sym_nse}", "symbol": sym_nse})
-                continue
-            try:
-                df      = data[sym_yf]
-                closes  = df['Close'].values.astype(float)
-                highs   = df['High'].values.astype(float)
-                lows    = df['Low'].values.astype(float)
-                chg_pct = ((closes[-1] - closes[0]) / closes[0]) * 100
-                # Per-symbol screener dates (if provided)
-                s_dates = (sym_screener_dates or {}).get(sym_nse) or \
-                          (sym_screener_dates or {}).get(sym_yf)
-                img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df,
-                                     screener_dates=s_dates)
-                chart_data.append({
+            if status == "ok":
+                results_map[sym_yf] = {
                     "symbol"    : sym_nse,
                     "name"      : name,
-                    "img_buf"   : img_buf,
-                    "last_close": round(float(closes[-1]), 2),
-                    "chg_pct"   : round(chg_pct, 2),
-                    "high_52w"  : round(float(highs.max()), 2),
-                    "low_52w"   : round(float(lows.min()), 2),
-                })
+                    "img_buf"   : BytesIO(img_bytes),
+                    "last_close": extra["last_close"],
+                    "chg_pct"   : extra["chg_pct"],
+                    "high_52w"  : extra["high_52w"],
+                    "low_52w"   : extra["low_52w"],
+                }
                 emit({"type": "progress", "done": done, "total": total,
                       "message": f"Charted {sym_nse}", "symbol": sym_nse})
-            except Exception as e:
+            else:
                 failed.append((sym_yf, sym_nse, name))
                 emit({"type": "progress", "done": done, "total": total,
                       "message": f"Chart error: {sym_nse}", "symbol": sym_nse})
 
-        if b_idx < len(batches) - 1:
-            delay = CONFIG["batch_delay_sec"] + random.uniform(0, 2)
-            time.sleep(delay)
+    # Preserve original symbol order in the PDF
+    for sym_yf, _, _ in symbol_list:
+        if sym_yf in results_map:
+            chart_data.append(results_map[sym_yf])
 
     if failed:
         for sym_yf, sym_nse, name in failed:
