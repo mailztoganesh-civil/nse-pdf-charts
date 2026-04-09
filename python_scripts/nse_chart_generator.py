@@ -39,28 +39,26 @@ CONFIG = {
     "chart_dpi"       : 120,
 }
 
-CLAUDE = {
-    "bg"        : "#F4F3EE",
-    "white"     : "#FFFFFF",
-    "orange"    : "#C15F3C",
-    "cloudy"    : "#B1ADA1",
-    "text"      : "#1A1A18",
-    "text_sec"  : "#6B6860",
-    "text_faint": "#A09C92",
-    "border"    : "#E5E3DC",
-    "chart_bg"  : "#FAFAF7",
-    "up"        : "#1E8449",
-    "up_alpha"  : "#1E8449",
-    "down"      : "#C0392B",
-    "down_alpha": "#C0392B",
-    "ma20"      : "#D4600A",
-    "ma50"      : "#7B70C7",
-    "vol_ma"    : "#4A9ECA",
-    "rsi_line"  : "#C15F3C",
-    "grid"      : "#E5E3DC",
-    "grid_month": "#D0CCC4",
-    "52wh"      : "#1E8449",
-    "52wl"      : "#C0392B",
+MS = {
+    "bg"           : "#0B0F1A",
+    "chart_bg"     : "#0B0F1A",
+    "text"         : "#E6EDF3",
+    "text_sec"     : "#8B949E",
+    "text_faint"   : "#3D444D",
+    "border"       : "#1E2736",
+    "grid"         : "#111827",
+    "grid_week"    : "#1A2540",
+    "up"           : "#3FB950",
+    "down"         : "#F85149",
+    "ma10"         : "#F0883E",
+    "ma21"         : "#56D364",
+    "ma50"         : "#818CF8",
+    "rs_line"      : "#38BDF8",
+    "vol_ma"       : "#F0883E",
+    "price_tag_bg" : "#F0883E",
+    "price_tag_fg" : "#0B0F1A",
+    "52wh"         : "#3FB950",
+    "52wl"         : "#F85149",
 }
 
 
@@ -190,25 +188,25 @@ def compute_ma(arr, window):
     return result
 
 
-def compute_rsi(closes, period=14):
-    deltas = np.diff(closes)
-    gains  = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-    rsi    = np.full(len(closes), np.nan)
-    if len(gains) < period:
-        return rsi
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-    for i in range(period, len(closes)):
-        avg_gain = (avg_gain * (period - 1) + gains[i - 1]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i - 1]) / period
-        rs = avg_gain / avg_loss if avg_loss != 0 else 1e9
-        rsi[i] = 100 - (100 / (1 + rs))
-    return rsi
+def compute_rs_line(stock_closes, stock_dates, nifty_df):
+    """Relative Strength vs NIFTY 50, normalised to 100 at period start."""
+    if nifty_df is None or nifty_df.empty or 'Close' not in nifty_df.columns:
+        return None
+    try:
+        nifty_close   = nifty_df['Close'].astype(float)
+        stock_idx     = pd.DatetimeIndex(stock_dates)
+        nifty_aligned = nifty_close.reindex(stock_idx, method='ffill').ffill().bfill()
+        nifty_arr     = nifty_aligned.values.astype(float)
+        if np.isnan(nifty_arr).all() or nifty_arr[0] == 0:
+            return None
+        rs = stock_closes / nifty_arr
+        return (rs / rs[0]) * 100
+    except Exception:
+        return None
 
 
-def draw_chart(symbol, name, df):
-    """Returns candlestick chart as PNG BytesIO."""
+def draw_chart(symbol, name, df, nifty_df=None):
+    """Returns MarketSmith-style candlestick chart as PNG BytesIO."""
     dates  = df.index.to_pydatetime()
     opens  = df['Open'].values.astype(float)
     highs  = df['High'].values.astype(float)
@@ -217,248 +215,229 @@ def draw_chart(symbol, name, df):
     vols   = df['Volume'].values.astype(float)
     n      = len(dates)
 
-    ma20 = compute_ma(closes, 20)
-    ma50 = compute_ma(closes, 50)
-    rsi  = compute_rsi(closes, 14)
+    ma10     = compute_ma(closes, 10)
+    ma21     = compute_ma(closes, 21)
+    ma50     = compute_ma(closes, 50)
     vol_ma20 = compute_ma(vols, 20)
+    rs_vals  = compute_rs_line(closes, dates, nifty_df)
 
-    p_min  = lows.min();  p_max = highs.max()
+    p_min = lows.min();  p_max = highs.max()
     price_range = p_max - p_min
-    pad    = price_range * 0.06
-    y_min  = p_min - pad
-    y_max  = p_max + pad * 2.5
+    pad   = price_range * 0.06
+    y_min = p_min - pad
+    y_max = p_max + pad * 2.2
 
-    high_52w = highs.max()
-    low_52w  = lows.min()
+    # Candle width adapts to bar density
+    w       = max(0.38, min(0.70, 65 / max(n, 1)))
+    wick_lw = max(0.7,  min(1.3,  55 / max(n, 1)))
 
-    # Candle width scales with bar count: tighter when more bars
-    w = max(0.35, min(0.65, 60 / max(n, 1)))
+    # Week boundaries (every ~5 trading days)
+    week_bdry = [i - 0.5 for i in range(1, n) if i % 5 == 0]
 
-    # Month boundary indices for vertical gridlines
-    month_boundaries = []
-    prev_month = None
-    for i, d in enumerate(dates):
-        if d.month != prev_month:
-            if i > 0:
-                month_boundaries.append(i - 0.5)
-            prev_month = d.month
+    # Month start indices for x-axis labels
+    month_ticks = [i for i in range(n)
+                   if i == 0 or dates[i].month != dates[i - 1].month]
 
-    fig = plt.figure(figsize=(20, 10), dpi=CONFIG["chart_dpi"], facecolor=CLAUDE["bg"])
-
-    # 3-panel layout: price (60%), RSI (18%), volume (22%)
-    gs = fig.add_gridspec(
-        5, 1, hspace=0.0,
-        left=0.055, right=0.935, top=0.895, bottom=0.065,
-        height_ratios=[3, 0.01, 1, 0.01, 1.15]
+    # ── Figure: 2 panels, dark background ─────────────────────────────────
+    fig = plt.figure(figsize=(22, 11), dpi=CONFIG["chart_dpi"], facecolor=MS["bg"])
+    gs  = fig.add_gridspec(
+        2, 1, hspace=0.0,
+        left=0.01, right=0.915, top=0.905, bottom=0.065,
+        height_ratios=[4.2, 1.3]
     )
-    ax1  = fig.add_subplot(gs[0, 0])          # price
-    ax_r = fig.add_subplot(gs[2, 0], sharex=ax1)  # RSI
-    ax2  = fig.add_subplot(gs[4, 0], sharex=ax1)  # volume
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
+    for ax in (ax1, ax2):
+        ax.set_facecolor(MS["chart_bg"])
 
-    for ax in (ax1, ax_r, ax2):
-        ax.set_facecolor(CLAUDE["chart_bg"])
+    # ── Week separators ────────────────────────────────────────────────────
+    for ax in (ax1, ax2):
+        for wb in week_bdry:
+            ax.axvline(wb, color=MS["grid_week"], linewidth=0.55,
+                       linestyle='-', alpha=0.55, zorder=0)
 
-    # ── Vertical month separators ──────────────────────────────────────────
-    for ax in (ax1, ax_r, ax2):
-        for mb in month_boundaries:
-            ax.axvline(mb, color=CLAUDE["grid_month"], linewidth=0.7,
-                       linestyle='--', alpha=0.7, zorder=0)
+    # ── Horizontal grid ────────────────────────────────────────────────────
+    ax1.yaxis.grid(True, color=MS["grid"], linewidth=0.5, zorder=0)
+    ax2.yaxis.grid(True, color=MS["grid"], linewidth=0.4, zorder=0)
+    ax1.set_axisbelow(True);  ax2.set_axisbelow(True)
 
-    # ── 52W H/L reference lines ────────────────────────────────────────────
-    if high_52w > y_min:
-        ax1.axhline(high_52w, color=CLAUDE["52wh"], linewidth=0.8,
-                    linestyle=':', alpha=0.55, zorder=1)
-        ax1.text(n + 0.6, high_52w, f'52W H', color=CLAUDE["52wh"],
-                 fontsize=7.5, va='center', fontweight='bold')
-    if low_52w < y_max:
-        ax1.axhline(low_52w, color=CLAUDE["52wl"], linewidth=0.8,
-                    linestyle=':', alpha=0.55, zorder=1)
-        ax1.text(n + 0.6, low_52w, f'52W L', color=CLAUDE["52wl"],
-                 fontsize=7.5, va='center', fontweight='bold')
-
-    # ── Candlestick bodies & wicks ─────────────────────────────────────────
-    wick_lw = max(0.6, min(1.1, 45 / max(n, 1)))
+    # ── Candlesticks: hollow up, filled down ───────────────────────────────
+    xs = np.arange(n)
     for i in range(n):
         is_up = closes[i] >= opens[i]
-        col   = CLAUDE["up"] if is_up else CLAUDE["down"]
-        # Wick
-        ax1.plot([i, i], [lows[i], highs[i]], color=col,
-                 linewidth=wick_lw, zorder=2, solid_capstyle='round')
-        # Body
-        bh = max(abs(closes[i] - opens[i]), price_range * 0.0015)
-        by = min(opens[i], closes[i])
+        col = MS["up"] if is_up else MS["down"]
+        bh  = max(abs(closes[i] - opens[i]), price_range * 0.0018)
+        by  = min(opens[i], closes[i])
         if is_up:
+            # Hollow green candle
+            ax1.plot([i, i], [lows[i], by],      color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
+            ax1.plot([i, i], [by + bh, highs[i]], color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
+            ax1.add_patch(mpatches.Rectangle(
+                (i - w/2, by), w, bh,
+                facecolor='none', edgecolor=col, linewidth=max(0.8, wick_lw * 0.9), zorder=3))
+        else:
+            # Solid red candle
+            ax1.plot([i, i], [lows[i], highs[i]], color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
             ax1.add_patch(mpatches.Rectangle(
                 (i - w/2, by), w, bh,
                 facecolor=col, edgecolor=col, linewidth=0.3, zorder=3, alpha=0.90))
-        else:
-            ax1.add_patch(mpatches.Rectangle(
-                (i - w/2, by), w, bh,
-                facecolor=col, edgecolor=col, linewidth=0.3, zorder=3, alpha=0.85))
 
-    # ── Moving averages ────────────────────────────────────────────────────
-    valid20 = ~np.isnan(ma20)
-    valid50 = ~np.isnan(ma50)
-    xs = np.arange(n)
-    if valid20.any():
-        ax1.plot(xs[valid20], ma20[valid20], color=CLAUDE["ma20"],
-                 linewidth=1.7, label='MA 20', zorder=4, alpha=0.92)
-    if valid50.any():
-        ax1.plot(xs[valid50], ma50[valid50], color=CLAUDE["ma50"],
-                 linewidth=1.5, label='MA 50', zorder=4, alpha=0.85, linestyle='--')
+    # ── Moving Averages ─────────────────────────────────────────────────────
+    for ma_arr, col, lbl, lw in [
+        (ma10, MS["ma10"], 'MA 10', 1.6),
+        (ma21, MS["ma21"], 'MA 21', 1.5),
+        (ma50, MS["ma50"], 'MA 50', 1.9),
+    ]:
+        valid = ~np.isnan(ma_arr)
+        if valid.sum() >= 2:
+            ax1.plot(xs[valid], ma_arr[valid], color=col, linewidth=lw,
+                     label=lbl, zorder=4, alpha=0.92)
+
+    # ── 52W High / Low reference lines ─────────────────────────────────────
+    h52 = highs.max();  l52 = lows.min()
+    ax1.axhline(h52, color=MS["52wh"], linewidth=0.7, linestyle=':', alpha=0.50, zorder=1)
+    ax1.axhline(l52, color=MS["52wl"], linewidth=0.7, linestyle=':', alpha=0.50, zorder=1)
+    ax1.text(n + 0.4, h52, '52W H', color=MS["52wh"], fontsize=7.5, va='center', fontweight='bold', fontfamily='monospace')
+    ax1.text(n + 0.4, l52, '52W L', color=MS["52wl"], fontsize=7.5, va='center', fontweight='bold', fontfamily='monospace')
+
+    # ── RS Line vs NIFTY (secondary y-axis overlay) ─────────────────────────
+    if rs_vals is not None:
+        ax_rs = ax1.twinx()
+        ax_rs.set_facecolor('none')
+        ax_rs.plot(xs, rs_vals, color=MS["rs_line"], linewidth=1.5, alpha=0.82, zorder=5)
+        ax_rs.fill_between(xs, rs_vals, 100,
+                           where=(rs_vals >= 100), color=MS["rs_line"], alpha=0.07, zorder=1)
+        ax_rs.fill_between(xs, rs_vals, 100,
+                           where=(rs_vals < 100),  color=MS["down"],    alpha=0.07, zorder=1)
+        rs_range = rs_vals.max() - rs_vals.min()
+        ax_rs.set_ylim(rs_vals.min() - rs_range * 0.5,
+                       rs_vals.max() + rs_range * 1.2)
+        ax_rs.axis('off')
+        ax_rs.set_xlim(-1, n + 5.5)
+        ax1.text(0.995, 0.015, f'RS {rs_vals[-1]:.0f}',
+                 transform=ax1.transAxes, color=MS["rs_line"],
+                 fontsize=8, ha='right', va='bottom', fontfamily='monospace', fontweight='bold')
 
     # ── Last price tag ─────────────────────────────────────────────────────
     lp = closes[-1]
-    ax1.axhline(lp, color=CLAUDE["orange"], linewidth=0.75, linestyle=':', alpha=0.5, zorder=1)
-    ax1.text(n + 0.5, lp, f'{RUPEE}{lp:,.2f}',
-             color=CLAUDE["white"], fontsize=8.5, va='center', fontweight='bold',
-             bbox=dict(facecolor=CLAUDE["orange"], edgecolor='none',
-                       boxstyle='round,pad=0.32'))
+    ax1.axhline(lp, color=MS["price_tag_bg"], linewidth=0.6, linestyle=':', alpha=0.45, zorder=1)
+    ax1.text(n + 0.4, lp, f'{RUPEE}{lp:,.0f}' if lp >= 100 else f'{RUPEE}{lp:,.2f}',
+             color=MS["price_tag_fg"], fontsize=8.5, va='center', fontweight='bold',
+             fontfamily='monospace',
+             bbox=dict(facecolor=MS["price_tag_bg"], edgecolor='none', boxstyle='round,pad=0.30'))
 
-    # ── Price change annotation ────────────────────────────────────────────
+    # ── OHLC & change annotation ────────────────────────────────────────────
     chg     = closes[-1] - closes[0]
     chg_pct = (chg / closes[0]) * 100
     arrow   = UP_ARROW if chg >= 0 else DOWN_ARROW
-    chg_col = CLAUDE["up"] if chg >= 0 else CLAUDE["down"]
-    info = (f"O {RUPEE}{opens[-1]:,.2f}   {DOT}   H {RUPEE}{highs.max():,.2f}   {DOT}   "
-            f"L {RUPEE}{lows.min():,.2f}   {DOT}   C {RUPEE}{closes[-1]:,.2f}")
-    ax1.text(0.005, 0.978, info, transform=ax1.transAxes,
-             color=CLAUDE["text_sec"], fontsize=8, va='top',
-             fontfamily='monospace')
-    ax1.text(0.60, 0.978, f"{arrow} {RUPEE}{abs(chg):,.2f}  ({abs(chg_pct):.2f}%)",
+    chg_col = MS["up"] if chg >= 0 else MS["down"]
+    fmt     = lambda v: f'{RUPEE}{v:,.0f}' if v >= 100 else f'{RUPEE}{v:,.2f}'
+    info    = (f"O {fmt(opens[-1])}  "
+               f"H {fmt(highs.max())}  "
+               f"L {fmt(lows.min())}  "
+               f"C {fmt(closes[-1])}")
+    ax1.text(0.005, 0.984, info, transform=ax1.transAxes,
+             color=MS["text_sec"], fontsize=8.5, va='top', fontfamily='monospace')
+    ax1.text(0.62, 0.984, f"{arrow} {fmt(abs(chg))}  ({abs(chg_pct):.2f}%)",
              transform=ax1.transAxes, color=chg_col,
-             fontsize=8.5, va='top', fontweight='bold')
+             fontsize=8.5, va='top', fontweight='bold', fontfamily='monospace')
 
-    # ── Price axis styling ─────────────────────────────────────────────────
-    ax1.yaxis.grid(True, color=CLAUDE["grid"], linewidth=0.5, linestyle='-', zorder=0)
-    ax1.xaxis.grid(False)
-    ax1.set_axisbelow(True)
-    for spine in ax1.spines.values():
-        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.7)
-    ax1.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=8.5,
-                    right=True, labelright=True, labelleft=False,
-                    length=3, width=0.5, pad=3)
+    # ── Price axis ─────────────────────────────────────────────────────────
+    ax1.tick_params(axis='y', colors=MS["text_sec"], labelsize=8.5,
+                    right=True, labelright=True, labelleft=False, length=3, width=0.5, pad=3)
     ax1.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda x, _: f'{RUPEE}{x:,.0f}' if x >= 100 else f'{RUPEE}{x:,.2f}'))
     ax1.tick_params(axis='x', bottom=False, labelbottom=False, length=0)
     ax1.set_ylim(y_min, y_max)
     ax1.set_xlim(-1, n + 5.5)
-    ax1.legend(facecolor=CLAUDE["white"], edgecolor=CLAUDE["border"],
-               labelcolor=CLAUDE["text_sec"], fontsize=8.5,
-               loc='upper left', bbox_to_anchor=(0.005, 0.91),
-               framealpha=0.95, borderpad=0.5, handlelength=1.8)
-
-    # ── RSI panel ──────────────────────────────────────────────────────────
-    valid_rsi = ~np.isnan(rsi)
-    if valid_rsi.any():
-        ax_r.plot(xs[valid_rsi], rsi[valid_rsi], color=CLAUDE["rsi_line"],
-                  linewidth=1.3, zorder=3, alpha=0.9)
-        ax_r.axhline(70, color=CLAUDE["down"], linewidth=0.7, linestyle='--', alpha=0.5)
-        ax_r.axhline(30, color=CLAUDE["up"],   linewidth=0.7, linestyle='--', alpha=0.5)
-        ax_r.axhline(50, color=CLAUDE["text_faint"], linewidth=0.5, linestyle=':', alpha=0.4)
-        ax_r.fill_between(xs[valid_rsi], rsi[valid_rsi], 70,
-                           where=(rsi[valid_rsi] >= 70),
-                           color=CLAUDE["down"], alpha=0.12, zorder=1)
-        ax_r.fill_between(xs[valid_rsi], rsi[valid_rsi], 30,
-                           where=(rsi[valid_rsi] <= 30),
-                           color=CLAUDE["up"], alpha=0.12, zorder=1)
-        last_rsi = rsi[valid_rsi][-1]
-        ax_r.text(n + 0.5, last_rsi, f'{last_rsi:.0f}',
-                  color=CLAUDE["rsi_line"], fontsize=7.5, va='center', fontweight='bold')
-    ax_r.set_ylim(10, 90)
-    ax_r.set_yticks([30, 50, 70])
-    ax_r.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=7.5,
-                     right=True, labelright=True, labelleft=False, length=2, width=0.5)
-    ax_r.yaxis.grid(True, color=CLAUDE["grid"], linewidth=0.4, zorder=0)
-    ax_r.set_axisbelow(True)
-    for spine in ax_r.spines.values():
-        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.5)
-    ax_r.tick_params(axis='x', bottom=False, labelbottom=False, length=0)
-    ax_r.text(-0.5, 50, 'RSI 14', color=CLAUDE["text_sec"],
-              fontsize=7, ha='right', va='center')
+    for sp in ax1.spines.values():
+        sp.set_color(MS["border"]);  sp.set_linewidth(0.6)
+    ax1.legend(facecolor=MS["bg"], edgecolor=MS["border"],
+               labelcolor=MS["text_sec"], fontsize=8.5,
+               loc='upper left', bbox_to_anchor=(0.005, 0.962),
+               framealpha=0.85, borderpad=0.5, handlelength=1.6, ncol=3)
 
     # ── Volume panel ───────────────────────────────────────────────────────
+    vol_max = vols.max()
     for i in range(n):
-        vc = CLAUDE["up"] if closes[i] >= opens[i] else CLAUDE["down"]
-        ax2.bar(i, vols[i], color=vc, width=w * 1.15, alpha=0.4, zorder=2)
+        vc    = MS["up"] if closes[i] >= opens[i] else MS["down"]
+        alpha = 0.50 if closes[i] >= opens[i] else 0.70
+        ax2.bar(i, vols[i], color=vc, width=w * 1.1, alpha=alpha, zorder=2)
     valid_vma = ~np.isnan(vol_ma20)
     if valid_vma.any():
-        ax2.plot(xs[valid_vma], vol_ma20[valid_vma], color=CLAUDE["vol_ma"],
-                 linewidth=1.3, zorder=3, alpha=0.85, label='Vol MA20')
-    ax2.yaxis.grid(True, color=CLAUDE["grid"], linewidth=0.4, zorder=0)
-    ax2.set_axisbelow(True)
-    for spine in ax2.spines.values():
-        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.5)
-    ax2.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=7.5,
+        ax2.plot(xs[valid_vma], vol_ma20[valid_vma], color=MS["vol_ma"],
+                 linewidth=1.3, zorder=3, alpha=0.90)
+    ax2.set_ylim(0, vol_max * 1.9)
+    ax2.tick_params(axis='y', colors=MS["text_sec"], labelsize=7.5,
                     right=True, labelright=True, labelleft=False, length=2, width=0.5)
-    vol_max = vols.max()
     ax2.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda x, _: f'{x/1e7:.1f}Cr' if vol_max > 5e6 else f'{x/1e5:.0f}L'))
-    ax2.set_ylim(0, vol_max * 1.6)
-    ax2.text(-0.5, vol_max * 0.5, 'VOL', color=CLAUDE["text_sec"],
-             fontsize=7, ha='right', va='center')
+    for sp in ax2.spines.values():
+        sp.set_color(MS["border"]);  sp.set_linewidth(0.5)
+    ax2.text(0.005, 0.85, 'VOL', transform=ax2.transAxes,
+             color=MS["text_faint"], fontsize=7.5, va='top', fontfamily='monospace')
 
-    # ── X-axis date ticks (bottom of volume panel) ─────────────────────────
-    tick_pos = [i for i in range(n) if dates[i].day <= 5]
-    tick_lbl = [dates[i].strftime('%b %y') for i in tick_pos]
-    ax2.set_xticks(tick_pos)
-    ax2.set_xticklabels(tick_lbl, color=CLAUDE["text_sec"], fontsize=8)
-    ax2.tick_params(axis='x', length=3, width=0.5, color=CLAUDE["border"])
+    # ── X-axis month labels ────────────────────────────────────────────────
+    ax2.set_xticks(month_ticks)
+    ax2.set_xticklabels(
+        [dates[i].strftime("%b '%y") for i in month_ticks],
+        color=MS["text_sec"], fontsize=8.5, fontfamily='monospace')
+    ax2.tick_params(axis='x', length=3, width=0.5, color=MS["border"])
     ax2.set_xlim(-1, n + 5.5)
 
     # ── Figure header ──────────────────────────────────────────────────────
     period = f"{dates[0].strftime('%d %b %Y')} {ENDASH} {dates[-1].strftime('%d %b %Y')}"
-    fig.text(0.055, 0.957, symbol,
-             color=CLAUDE["text"], fontsize=16, fontweight='bold', fontfamily='serif')
-    name_x = 0.055 + len(symbol) * 0.0115
-    fig.text(name_x, 0.958, f'  {DOT}  {name}',
-             color=CLAUDE["text_sec"], fontsize=10.5, fontfamily='serif', va='bottom')
-    fig.text(0.935, 0.957, period,
-             color=CLAUDE["text_sec"], fontsize=8.5, ha='right', fontfamily='serif')
+    fig.text(0.015, 0.963, symbol,
+             color=MS["text"], fontsize=16, fontweight='bold', fontfamily='monospace')
+    sym_w = len(symbol) * 0.0093
+    fig.text(0.015 + sym_w, 0.963, f'  {DOT}  {name}',
+             color=MS["text_sec"], fontsize=10.5, fontfamily='sans-serif', va='center')
+    fig.text(0.915, 0.963, period,
+             color=MS["text_sec"], fontsize=8.5, ha='right', fontfamily='monospace', va='center')
 
     buf = BytesIO()
     plt.savefig(buf, format='png', dpi=CONFIG["chart_dpi"],
-                bbox_inches='tight', facecolor=CLAUDE["bg"])
+                bbox_inches='tight', facecolor=MS["bg"])
     plt.close()
     buf.seek(0)
     return buf
 
 
 def build_pdf(chart_data, output_path, label="NSE Stock Charts"):
-    BG     = colors.HexColor(CLAUDE["bg"])
-    ORANGE = colors.HexColor(CLAUDE["orange"])
-    TEXT   = colors.HexColor(CLAUDE["text"])
-    TSEC   = colors.HexColor(CLAUDE["text_sec"])
-    BORD   = colors.HexColor(CLAUDE["border"])
+    BG     = colors.HexColor(MS["bg"])
+    ORANGE = colors.HexColor(MS["price_tag_bg"])
+    TEXT   = colors.HexColor(MS["text"])
+    TSEC   = colors.HexColor(MS["text_sec"])
+    BORD   = colors.HexColor(MS["border"])
 
-    hdr_s = ParagraphStyle('hdr', fontSize=7.5, fontName='Times-Roman', textColor=TSEC, leading=11)
-    ftr_s = ParagraphStyle('ftr', fontSize=6.5, fontName='Times-Italic', textColor=TSEC)
-    cov_t = ParagraphStyle('ct',  fontSize=26,  fontName='Times-Bold', textColor=TEXT, spaceAfter=10, leading=32)
-    cov_s = ParagraphStyle('cs',  fontSize=12,  fontName='Times-Roman', textColor=TSEC, spaceAfter=5, leading=17)
-    cov_n = ParagraphStyle('cn',  fontSize=9,   fontName='Times-Italic', textColor=TSEC)
+    hdr_s = ParagraphStyle('hdr', fontSize=7.5,  fontName='Courier',      textColor=TSEC, leading=11)
+    ftr_s = ParagraphStyle('ftr', fontSize=6.5,  fontName='Courier',      textColor=TSEC)
+    cov_t = ParagraphStyle('ct',  fontSize=28,   fontName='Courier-Bold', textColor=TEXT, spaceAfter=10, leading=34)
+    cov_s = ParagraphStyle('cs',  fontSize=11,   fontName='Courier',      textColor=TSEC, spaceAfter=5, leading=16)
+    cov_n = ParagraphStyle('cn',  fontSize=8.5,  fontName='Courier',      textColor=TSEC)
 
     def add_bg(canvas, doc):
         canvas.saveState()
         canvas.setFillColor(BG)
         canvas.rect(0, 0, *landscape(A4), fill=1, stroke=0)
         canvas.setFillColor(ORANGE)
-        canvas.rect(0, 0, landscape(A4)[0], 0.25*cm, fill=1, stroke=0)
+        canvas.rect(0, 0, landscape(A4)[0], 0.28*cm, fill=1, stroke=0)
         canvas.restoreState()
 
     doc = SimpleDocTemplate(output_path, pagesize=landscape(A4),
-                            leftMargin=1.2*cm, rightMargin=1.2*cm,
-                            topMargin=1*cm, bottomMargin=1*cm)
+                            leftMargin=0.8*cm, rightMargin=0.8*cm,
+                            topMargin=0.8*cm, bottomMargin=0.8*cm)
     story = []
 
     story.append(Spacer(1, 4.5*cm))
     story.append(Paragraph(label, cov_t))
-    story.append(HRFlowable(width="100%", thickness=1.2, color=ORANGE, spaceAfter=10))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=ORANGE, spaceAfter=12))
     story.append(Paragraph(f"End-of-Day Candlestick Report {EMDASH} NSE Equity Stocks", cov_s))
     story.append(Paragraph(
         f"Generated {datetime.today().strftime('%A, %d %B %Y')}  {DOT}  {datetime.today().strftime('%H:%M IST')}", cov_s))
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(
-        f"Stocks: {len(chart_data)}  {DOT}  Indicators: Candlestick {DOT} MA20 {DOT} MA50 {DOT} Volume  {DOT}  Source: Yahoo Finance (EOD)",
+        f"Stocks: {len(chart_data)}  {DOT}  Indicators: Candlestick {DOT} MA10 {DOT} MA21 {DOT} MA50 {DOT} RS vs NIFTY {DOT} Volume MA20  {DOT}  Source: Yahoo Finance",
         cov_n))
     story.append(PageBreak())
 
@@ -471,14 +450,14 @@ def build_pdf(chart_data, output_path, label="NSE Stock Charts"):
             f"{arrow} {abs(item['chg_pct']):.2f}% (period)  {DOT}  "
             f"52W H {RUPEE}{item['high_52w']:,.2f}  /  L {RUPEE}{item['low_52w']:,.2f}  {DOT}  "
             f"#{idx} of {total}", hdr_s))
-        story.append(Spacer(1, 0.12*cm))
-        story.append(Image(item['img_buf'], width=26.5*cm, height=15*cm))
-        story.append(Spacer(1, 0.1*cm))
+        story.append(Spacer(1, 0.10*cm))
+        story.append(Image(item['img_buf'], width=27.5*cm, height=15.8*cm))
+        story.append(Spacer(1, 0.08*cm))
         story.append(HRFlowable(width="100%", thickness=0.4, color=BORD, spaceAfter=3))
         story.append(Paragraph(
-            f"Daily OHLCV Candlestick  {DOT}  MA20 (terracotta)  {DOT}  "
-            f"MA50 (gray dashed)  {DOT}  Data: Yahoo Finance EOD  {DOT}  "
-            f"{datetime.today().strftime('%d %b %Y')}", ftr_s))
+            f"Daily OHLCV  {DOT}  MA10 (orange) MA21 (green) MA50 (purple)  {DOT}  "
+            f"RS Line (blue) vs NIFTY 50  {DOT}  Hollow=Up  Filled=Down  {DOT}  "
+            f"Data: Yahoo Finance EOD  {DOT}  {datetime.today().strftime('%d %b %Y')}", ftr_s))
         story.append(PageBreak())
 
     doc.build(story, onFirstPage=add_bg, onLaterPages=add_bg)
@@ -496,6 +475,24 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
     done   = 0
 
     emit({"type": "progress", "done": 0, "total": total, "message": "Starting..."})
+
+    # Fetch NIFTY 50 once upfront for the RS Line indicator
+    nifty_df = None
+    try:
+        n_end   = datetime.today()
+        n_start = n_end - timedelta(days=history_months * 31 + 30)
+        nraw = yf.download(
+            "^NSEI",
+            start=n_start.strftime("%Y-%m-%d"),
+            end=n_end.strftime("%Y-%m-%d"),
+            auto_adjust=True, progress=False, timeout=20)
+        if not nraw.empty:
+            if isinstance(nraw.columns, pd.MultiIndex):
+                nraw.columns = nraw.columns.get_level_values(1)
+            nifty_df = nraw
+            emit({"type": "progress", "done": 0, "total": total, "message": "NIFTY 50 loaded for RS Line"})
+    except Exception:
+        pass  # RS line will be skipped if NIFTY unavailable
 
     batches = [symbol_list[i:i+CONFIG["batch_size"]]
                for i in range(0, len(symbol_list), CONFIG["batch_size"])]
@@ -519,7 +516,7 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                 highs   = df['High'].values.astype(float)
                 lows    = df['Low'].values.astype(float)
                 chg_pct = ((closes[-1] - closes[0]) / closes[0]) * 100
-                img_buf = draw_chart(sym_yf, name, df)
+                img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df)
                 chart_data.append({
                     "symbol"    : sym_nse,
                     "name"      : name,
@@ -550,7 +547,7 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                     highs   = df['High'].values.astype(float)
                     lows    = df['Low'].values.astype(float)
                     chg_pct = ((closes[-1] - closes[0]) / closes[0]) * 100
-                    img_buf = draw_chart(sym_yf, name, df)
+                    img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df)
                     chart_data.append({
                         "symbol"    : sym_nse,
                         "name"      : name,
