@@ -32,11 +32,11 @@ UP_ARROW   = '\u25b2'
 DOWN_ARROW = '\u25bc'
 
 CONFIG = {
-    "batch_size"      : 50,
-    "batch_delay_sec" : 5,
-    "retry_attempts"  : 3,
-    "retry_delay_sec" : 10,
-    "chart_dpi"       : 150,
+    "batch_size"      : 100,
+    "batch_delay_sec" : 1,
+    "retry_attempts"  : 2,
+    "retry_delay_sec" : 5,
+    "chart_dpi"       : 120,
 }
 
 CLAUDE = {

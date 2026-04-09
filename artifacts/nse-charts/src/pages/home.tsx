@@ -286,7 +286,7 @@ export default function Home() {
                 <div className="border-2 border-dashed border-muted rounded-lg p-12 text-center hover:bg-muted/10 transition-colors">
                   <input 
                     type="file" 
-                    accept=".csv" 
+                    accept=".csv,text/csv,application/csv,text/plain,application/vnd.ms-excel" 
                     className="hidden" 
                     ref={fileInputRef}
                     onChange={handleFileUpload}

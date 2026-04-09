@@ -22,11 +22,22 @@ const UPLOADS_DIR = resolve(WORKSPACE_ROOT, "tmp_uploads");
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(UPLOADS_DIR, { recursive: true });
 
+const CSV_MIMES = new Set([
+  "text/csv",
+  "application/csv",
+  "text/comma-separated-values",
+  "application/vnd.ms-excel",
+  "text/plain",
+  "application/octet-stream",
+]);
+
 const upload = multer({
   dest: UPLOADS_DIR,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === "text/csv" || file.originalname.endsWith(".csv")) {
+    const isCsvName = file.originalname.toLowerCase().endsWith(".csv");
+    const isCsvMime = CSV_MIMES.has(file.mimetype);
+    if (isCsvName || isCsvMime) {
       cb(null, true);
     } else {
       cb(new Error("Only CSV files are allowed"));
