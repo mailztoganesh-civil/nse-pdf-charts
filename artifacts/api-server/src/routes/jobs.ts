@@ -14,7 +14,11 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-const WORKSPACE_ROOT = resolve(process.cwd(), "..", "..");
+// In dev, cwd is artifacts/api-server/ so we go up two levels.
+// In production, cwd is already the workspace root (pnpm-workspace.yaml is present).
+const WORKSPACE_ROOT = existsSync(resolve(process.cwd(), "pnpm-workspace.yaml"))
+  ? process.cwd()
+  : resolve(process.cwd(), "..", "..");
 const OUTPUT_DIR = resolve(WORKSPACE_ROOT, "output");
 const SCRIPTS_DIR = resolve(WORKSPACE_ROOT, "python_scripts");
 const UPLOADS_DIR = resolve(WORKSPACE_ROOT, "tmp_uploads");
