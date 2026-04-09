@@ -209,7 +209,7 @@ def compute_rs_line(stock_closes, stock_dates, nifty_df):
         return None
 
 
-def draw_chart(symbol, name, df, nifty_df=None):
+def draw_chart(symbol, name, df, nifty_df=None, screener_dates=None):
     """Returns MarketSmith-style candlestick chart as PNG BytesIO."""
     dates  = df.index.to_pydatetime()
     opens  = df['Open'].values.astype(float)
@@ -228,7 +228,9 @@ def draw_chart(symbol, name, df, nifty_df=None):
     p_min = lows.min();  p_max = highs.max()
     price_range = p_max - p_min
     pad   = price_range * 0.06
-    y_min = p_min - pad
+    # Extra room at bottom if screener arrows are present
+    arrow_pad = price_range * 0.055 if screener_dates else 0
+    y_min = p_min - pad - arrow_pad
     y_max = p_max + pad * 2.2
 
     # Candle width adapts to bar density — kept wide for visibility
@@ -280,6 +282,26 @@ def draw_chart(symbol, name, df, nifty_df=None):
         ax1.add_patch(mpatches.Rectangle(
             (i - w/2, by), w, bh,
             facecolor=col, edgecolor=col, linewidth=0, zorder=3))
+
+    # ── Screener-date up arrows ─────────────────────────────────────────────
+    if screener_dates:
+        # Convert to set of date strings "YYYY-MM-DD" for fast lookup
+        sd_set = set()
+        for d in screener_dates:
+            if hasattr(d, 'strftime'):
+                sd_set.add(d.strftime('%Y-%m-%d'))
+            else:
+                sd_set.add(str(d)[:10])
+        arrow_gap  = price_range * 0.032   # gap below candle low
+        arrow_col  = "#FF6D00"             # bright orange — stands out on both themes
+        for i, dt in enumerate(dates):
+            if dt.strftime('%Y-%m-%d') in sd_set:
+                y_pos = lows[i] - arrow_gap
+                ax1.annotate('▲',
+                             xy=(i, y_pos),
+                             ha='center', va='top',
+                             fontsize=10, color=arrow_col,
+                             fontweight='bold', zorder=6)
 
     # ── Moving Averages ─────────────────────────────────────────────────────
     ma_endpoints = []   # collect (value, color) for right-axis pills
@@ -507,7 +529,8 @@ def build_pdf(chart_data, output_path, label="NSE Stock Charts"):
     doc.build(story, onFirstPage=add_bg, onLaterPages=add_bg)
 
 
-def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stock Charts"):
+def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stock Charts",
+                 sym_screener_dates=None):
     """
     Generate PDF for a list of (yf_symbol, nse_symbol, name) tuples.
     Emits JSON progress lines to stdout.
@@ -560,7 +583,11 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                 highs   = df['High'].values.astype(float)
                 lows    = df['Low'].values.astype(float)
                 chg_pct = ((closes[-1] - closes[0]) / closes[0]) * 100
-                img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df)
+                # Per-symbol screener dates (if provided)
+                s_dates = (sym_screener_dates or {}).get(sym_nse) or \
+                          (sym_screener_dates or {}).get(sym_yf)
+                img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df,
+                                     screener_dates=s_dates)
                 chart_data.append({
                     "symbol"    : sym_nse,
                     "name"      : name,
@@ -591,7 +618,10 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                     highs   = df['High'].values.astype(float)
                     lows    = df['Low'].values.astype(float)
                     chg_pct = ((closes[-1] - closes[0]) / closes[0]) * 100
-                    img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df)
+                    s_dates = (sym_screener_dates or {}).get(sym_nse) or \
+                              (sym_screener_dates or {}).get(sym_yf)
+                    img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df,
+                                        screener_dates=s_dates)
                     chart_data.append({
                         "symbol"    : sym_nse,
                         "name"      : name,
@@ -624,7 +654,27 @@ def main():
     parser.add_argument('--history-months', type=int, default=6)
     parser.add_argument('--label', default='NSE Stock Charts')
     parser.add_argument('--letters', default='', help='Letter range filter e.g. A-D or A,B,C')
+    parser.add_argument('--screener-dates-file', default='',
+                        help='Path to JSON file mapping date→[symbols] for screener-date arrows')
     args = parser.parse_args()
+
+    # Build symbol→dates mapping from screener JSON (date → [symbols])
+    sym_screener_dates = {}
+    if args.screener_dates_file and os.path.exists(args.screener_dates_file):
+        try:
+            import json as _json
+            date_to_syms = _json.loads(open(args.screener_dates_file).read())
+            # Invert: symbol → [dates]
+            for date_str, syms in date_to_syms.items():
+                for sym in syms:
+                    sym_screener_dates.setdefault(sym, []).append(date_str)
+            # Clean up temp file
+            try:
+                os.remove(args.screener_dates_file)
+            except Exception:
+                pass
+        except Exception as e:
+            logging.warning(f"Could not load screener dates file: {e}")
 
     if args.mode == 'all':
         emit({"type": "progress", "done": 0, "total": 1, "message": "Fetching NSE symbol list..."})
@@ -643,14 +693,16 @@ def main():
 
         emit({"type": "progress", "done": 0, "total": len(symbol_list),
               "message": f"Found {len(symbol_list)} NSE symbols"})
-        run_generate(symbol_list, args.output, args.history_months, args.label)
+        run_generate(symbol_list, args.output, args.history_months, args.label,
+                     sym_screener_dates=sym_screener_dates or None)
     else:
         if not args.symbols:
             emit({"type": "error", "message": "No symbols provided for filtered mode"})
             sys.exit(1)
         syms = [s.strip().upper() for s in args.symbols.split(',') if s.strip()]
         symbol_list = [(f"{s}.NS", s, s) for s in syms]
-        run_generate(symbol_list, args.output, args.history_months, args.label)
+        run_generate(symbol_list, args.output, args.history_months, args.label,
+                     sym_screener_dates=sym_screener_dates or None)
 
 
 if __name__ == '__main__':

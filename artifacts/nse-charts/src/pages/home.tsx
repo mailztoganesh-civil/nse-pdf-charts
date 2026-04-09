@@ -315,7 +315,15 @@ export default function Home() {
           stocks: filteredStocks,
           startDate, 
           endDate, 
-          historyMonths: parseInt(historyMonths, 10) || 6 
+          historyMonths: parseInt(historyMonths, 10) || 6,
+          // Only send stocksByDate entries within the selected date range
+          stocksByDate: parseResult
+            ? Object.fromEntries(
+                Object.entries(parseResult.stocksByDate).filter(
+                  ([date]) => date >= startDate && date <= endDate
+                )
+              )
+            : undefined,
         } 
       },
       {

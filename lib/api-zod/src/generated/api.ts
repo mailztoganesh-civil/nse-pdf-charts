@@ -71,6 +71,7 @@ export const GenerateFromCsvBody = zod.object({
   startDate: zod.string(),
   endDate: zod.string(),
   historyMonths: zod.number().default(generateFromCsvBodyHistoryMonthsDefault),
+  stocksByDate: zod.record(zod.string(), zod.array(zod.string())).optional(),
 });
 
 /**

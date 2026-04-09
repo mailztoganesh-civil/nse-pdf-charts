@@ -61,6 +61,7 @@ export interface GenerateCsvRequest {
   startDate: string;
   endDate: string;
   historyMonths?: number;
+  stocksByDate?: { [key: string]: string[] };
 }
 
 export type ParseCsvBody = {

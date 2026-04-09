@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { spawn } from "child_process";
-import { createReadStream, existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import multer from "multer";
 import {
@@ -306,7 +306,7 @@ router.post("/jobs/generate-csv", async (req, res): Promise<void> => {
     return;
   }
 
-  const { stocks, startDate, endDate, historyMonths = 6 } = parsed.data;
+  const { stocks, startDate, endDate, historyMonths = 6, stocksByDate } = parsed.data;
 
   if (!stocks.length) {
     res.status(400).json({ error: "No stocks provided" });
@@ -333,13 +333,22 @@ router.post("/jobs/generate-csv", async (req, res): Promise<void> => {
   jobs.set(jobId, job);
   req.log.info({ jobId, stockCount: stocks.length, startDate, endDate }, "Starting CSV-filtered generation job");
 
-  spawnPythonJob(job, [
+  // Write stocksByDate to a temp JSON file so Python can mark screener-date arrows
+  const pyArgs: string[] = [
     "--mode", "filtered",
     "--output", outFile,
     "--symbols", stocks.join(","),
     "--history-months", String(historyMonths),
     "--label", `NSE Screener Charts — ${startDate} to ${endDate}`,
-  ]);
+  ];
+
+  if (stocksByDate && Object.keys(stocksByDate).length > 0) {
+    const screenerFile = join(UPLOADS_DIR, `screener_${jobId}.json`);
+    writeFileSync(screenerFile, JSON.stringify(stocksByDate), "utf-8");
+    pyArgs.push("--screener-dates-file", screenerFile);
+  }
+
+  spawnPythonJob(job, pyArgs);
 
   res.status(202).json(GetJobResponse.parse({ ...job, outputFile: undefined }));
 });
