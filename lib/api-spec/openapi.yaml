@@ -184,6 +184,10 @@ components:
         historyMonths:
           type: integer
           default: 6
+        letterFilter:
+          type: string
+          description: "Filter stocks by starting letter range e.g. 'A-D' or 'ALL'"
+          default: "ALL"
 
     CsvParseResult:
       type: object

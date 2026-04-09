@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { spawn } from "child_process";
-import { createReadStream, existsSync, mkdirSync } from "fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
 import { join, resolve } from "path";
 import multer from "multer";
 import {
@@ -145,10 +145,13 @@ router.get("/jobs", async (_req, res): Promise<void> => {
 router.post("/jobs/generate-all", async (req, res): Promise<void> => {
   const parsed = GenerateAllNseBody.safeParse(req.body ?? {});
   const historyMonths = parsed.success ? (parsed.data.historyMonths ?? 6) : 6;
+  const letterFilter: string = (parsed.success ? (parsed.data.letterFilter ?? "ALL") : "ALL").toUpperCase();
 
   const jobId = makeJobId();
   const today = new Date().toISOString().slice(0, 10);
-  const outFile = join(OUTPUT_DIR, `NSE_All_${today}_${jobId}.pdf`);
+  const safeFilter = letterFilter.replace(/[^A-Z\-]/g, "") || "ALL";
+  const outFile = join(OUTPUT_DIR, `NSE_${safeFilter}_${today}_${jobId}.pdf`);
+  const label = letterFilter === "ALL" ? "NSE All Stocks — EOD Charts" : `NSE Stocks ${letterFilter} — EOD Charts`;
 
   const job: Job = {
     jobId,
@@ -164,17 +167,47 @@ router.post("/jobs/generate-all", async (req, res): Promise<void> => {
   };
 
   jobs.set(jobId, job);
-  req.log.info({ jobId, historyMonths }, "Starting all-NSE generation job");
+  req.log.info({ jobId, historyMonths, letterFilter }, "Starting all-NSE generation job");
 
-  spawnPythonJob(job, [
+  const args = [
     "--mode", "all",
     "--output", outFile,
     "--history-months", String(historyMonths),
-    "--label", "NSE All Stocks — EOD Charts",
-  ]);
+    "--label", label,
+  ];
+  if (letterFilter !== "ALL") args.push("--letters", letterFilter);
+
+  spawnPythonJob(job, args);
 
   res.status(202).json(GetJobResponse.parse({ ...job, outputFile: undefined }));
 });
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQuotes = !inQuotes; }
+    else if ((ch === "," || ch === ";") && !inQuotes) { result.push(current.trim()); current = ""; }
+    else { current += ch; }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+const SYMBOL_COLS = ["symbol","ticker","stock","nse_symbol","nsecode","nse code","scrip","nse","name"];
+const DATE_COLS   = ["date","screener date","screenerdate","signal date","signal_date","entry date",
+                     "entry_date","trade date","trade_date","alert date","alert_date","scan date","scan_date"];
+
+function detectColIdx(headers: string[], candidates: string[]): number {
+  const lh = headers.map(h => h.toLowerCase().replace(/[^a-z0-9 _]/g, "").trim());
+  for (const c of candidates) {
+    const idx = lh.findIndex(h => h === c);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
 
 router.post("/jobs/parse-csv", upload.single("file"), async (req, res): Promise<void> => {
   if (!req.file) {
@@ -185,26 +218,69 @@ router.post("/jobs/parse-csv", upload.single("file"), async (req, res): Promise<
   const filePath = req.file.path;
   req.log.info({ file: req.file.originalname }, "Parsing CSV");
 
-  const { execFile } = await import("child_process");
-  const script = join(SCRIPTS_DIR, "parse_csv.py");
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    try { unlinkSync(filePath); } catch { /* ignore */ }
 
-  execFile("python3", [script, filePath], { timeout: 30000 }, (err, stdout, stderr) => {
-    if (err) {
-      logger.error({ err, stderr }, "CSV parse failed");
-      res.status(400).json({ error: `CSV parse failed: ${err.message}` });
+    const lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
+    if (lines.length < 2) {
+      res.status(400).json({ error: "CSV is empty or has no data rows" });
       return;
     }
-    try {
-      const result = JSON.parse(stdout);
-      if (result.error) {
-        res.status(400).json({ error: result.error });
-        return;
+
+    const headers = parseCsvLine(lines[0]);
+    let symIdx = detectColIdx(headers, SYMBOL_COLS);
+    let dateIdx = detectColIdx(headers, DATE_COLS);
+
+    // Heuristic: first col with short all-caps values
+    if (symIdx < 0) {
+      const sample = lines.slice(1, Math.min(11, lines.length)).map(l => parseCsvLine(l));
+      for (let ci = 0; ci < headers.length; ci++) {
+        const vals = sample.map(r => (r[ci] ?? "").trim());
+        if (vals.every(v => v.length > 0 && v.length <= 20 && /^[A-Z0-9&.\-]+$/.test(v))) {
+          symIdx = ci; break;
+        }
       }
-      res.json(result);
-    } catch {
-      res.status(500).json({ error: "Invalid response from parser" });
     }
-  });
+
+    if (symIdx < 0) {
+      res.status(400).json({ error: "Could not find a stock symbol column. Expected SYMBOL, Ticker, Stock, etc." });
+      return;
+    }
+
+    const stocks = new Set<string>();
+    const dateSet = new Set<string>();
+
+    for (const line of lines.slice(1)) {
+      const cells = parseCsvLine(line);
+      const sym = (cells[symIdx] ?? "").trim().toUpperCase().replace(/[^A-Z0-9&.\-]/g, "");
+      if (sym.length >= 1 && sym.length <= 20) stocks.add(sym);
+
+      if (dateIdx >= 0) {
+        const raw = (cells[dateIdx] ?? "").trim();
+        if (raw) {
+          const d = new Date(raw);
+          if (!isNaN(d.getTime())) {
+            dateSet.add(d.toISOString().slice(0, 10));
+          }
+        }
+      }
+    }
+
+    const sortedStocks = [...stocks].sort();
+    const sortedDates  = [...dateSet].sort();
+
+    res.json({
+      stocks: sortedStocks,
+      dates: sortedDates,
+      minDate: sortedDates[0] ?? "",
+      maxDate: sortedDates[sortedDates.length - 1] ?? "",
+      totalRows: lines.length - 1,
+    });
+  } catch (err: any) {
+    logger.error({ err }, "CSV parse failed");
+    res.status(500).json({ error: "Failed to read the uploaded file" });
+  }
 });
 
 router.post("/jobs/generate-csv", async (req, res): Promise<void> => {

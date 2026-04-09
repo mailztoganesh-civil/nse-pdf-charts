@@ -35,9 +35,14 @@ export const ListJobsResponse = zod.array(ListJobsResponseItem);
  * @summary Start generating PDF for all NSE stocks
  */
 export const generateAllNseBodyHistoryMonthsDefault = 6;
+export const generateAllNseBodyLetterFilterDefault = `ALL`;
 
 export const GenerateAllNseBody = zod.object({
   historyMonths: zod.number().default(generateAllNseBodyHistoryMonthsDefault),
+  letterFilter: zod
+    .string()
+    .default(generateAllNseBodyLetterFilterDefault)
+    .describe("Filter stocks by starting letter range e.g. 'A-D' or 'ALL'"),
 });
 
 /**

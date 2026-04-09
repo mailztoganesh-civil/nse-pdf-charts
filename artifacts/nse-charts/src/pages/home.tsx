@@ -123,6 +123,17 @@ export default function Home() {
 
   // All NSE state
   const [historyMonths, setHistoryMonths] = useState("6");
+  const [letterFilter, setLetterFilter] = useState("ALL");
+
+  const LETTER_RANGES = [
+    { label: "All", value: "ALL", desc: "~2000+ stocks" },
+    { label: "A – D", value: "A-D", desc: "~300 stocks" },
+    { label: "E – H", value: "E-H", desc: "~250 stocks" },
+    { label: "I – L", value: "I-L", desc: "~250 stocks" },
+    { label: "M – P", value: "M-P", desc: "~350 stocks" },
+    { label: "Q – T", value: "Q-T", desc: "~500 stocks" },
+    { label: "U – Z", value: "U-Z", desc: "~350 stocks" },
+  ];
 
   // CSV state
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -134,7 +145,7 @@ export default function Home() {
 
   const handleGenerateAll = () => {
     generateAllMutation.mutate(
-      { data: { historyMonths: parseInt(historyMonths, 10) || 6 } },
+      { data: { historyMonths: parseInt(historyMonths, 10) || 6, letterFilter } },
       {
         onSuccess: (job) => {
           setActiveJobId(job.jobId);
@@ -244,8 +255,30 @@ export default function Home() {
               <CardDescription className="font-mono">Generate charts for all active NSE symbols.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+
               <div className="space-y-2">
-                <Label htmlFor="history-months" className="font-mono">History Months</Label>
+                <Label className="font-mono text-xs text-muted-foreground uppercase tracking-widest">Stock Range (by first letter)</Label>
+                <div className="grid grid-cols-4 gap-2">
+                  {LETTER_RANGES.map(({ label, value, desc }) => (
+                    <button
+                      key={value}
+                      onClick={() => setLetterFilter(value)}
+                      className={`flex flex-col items-center justify-center rounded-md border px-2 py-3 text-center transition-colors font-mono
+                        ${letterFilter === value
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border bg-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                        }`}
+                      data-testid={`filter-${value}`}
+                    >
+                      <span className="text-sm font-bold leading-none mb-1">{label}</span>
+                      <span className="text-[10px] leading-none opacity-70">{desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="history-months" className="font-mono text-xs text-muted-foreground uppercase tracking-widest">History Months</Label>
                 <div className="flex items-center gap-4">
                   <Input 
                     id="history-months" 
@@ -268,7 +301,7 @@ export default function Home() {
                 data-testid="button-generate-all"
               >
                 {generateAllMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                GENERATE ALL NSE PDF
+                {letterFilter === "ALL" ? "GENERATE ALL NSE PDF" : `GENERATE ${letterFilter} STOCKS PDF`}
               </Button>
             </CardContent>
           </Card>

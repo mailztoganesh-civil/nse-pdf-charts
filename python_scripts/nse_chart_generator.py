@@ -436,12 +436,24 @@ def main():
     parser.add_argument('--symbols', default='', help='Comma-separated NSE symbols (for filtered mode)')
     parser.add_argument('--history-months', type=int, default=6)
     parser.add_argument('--label', default='NSE Stock Charts')
+    parser.add_argument('--letters', default='', help='Letter range filter e.g. A-D or A,B,C')
     args = parser.parse_args()
 
     if args.mode == 'all':
         emit({"type": "progress", "done": 0, "total": 1, "message": "Fetching NSE symbol list..."})
         symbol_list = get_nse_symbols()
         symbol_list.sort(key=lambda x: x[1])
+
+        # Apply letter filter if specified
+        if args.letters:
+            letter_range = args.letters.strip().upper()
+            if '-' in letter_range and len(letter_range) == 3:
+                start_l, end_l = letter_range[0], letter_range[2]
+                allowed = set(chr(c) for c in range(ord(start_l), ord(end_l) + 1))
+            else:
+                allowed = set(l.strip() for l in letter_range.split(',') if l.strip())
+            symbol_list = [s for s in symbol_list if s[1] and s[1][0].upper() in allowed]
+
         emit({"type": "progress", "done": 0, "total": len(symbol_list),
               "message": f"Found {len(symbol_list)} NSE symbols"})
         run_generate(symbol_list, args.output, args.history_months, args.label)

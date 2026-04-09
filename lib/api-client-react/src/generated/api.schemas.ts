@@ -41,6 +41,8 @@ export interface Job {
 
 export interface GenerateAllRequest {
   historyMonths?: number;
+  /** Filter stocks by starting letter range e.g. 'A-D' or 'ALL' */
+  letterFilter?: string;
 }
 
 export interface CsvParseResult {
