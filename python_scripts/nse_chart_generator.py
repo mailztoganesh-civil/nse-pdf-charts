@@ -45,20 +45,20 @@ MS = {
     "text"         : "#1A1A1A",
     "text_sec"     : "#555555",
     "text_faint"   : "#AAAAAA",
-    "border"       : "#DDDDDD",
-    "grid"         : "#F0F0F0",
-    "grid_week"    : "#E0E0E0",
-    "up"           : "#1A7A3C",
-    "down"         : "#D63027",
-    "ma10"         : "#E07B00",
-    "ma21"         : "#1A7A3C",
-    "ma50"         : "#6C5FCF",
-    "rs_line"      : "#0078D4",
-    "vol_ma"       : "#E07B00",
-    "price_tag_bg" : "#E07B00",
+    "border"       : "#E0E0E0",
+    "grid"         : "#F5F5F5",
+    "grid_week"    : "#EBEBEB",
+    "up"           : "#26A69A",
+    "down"         : "#EF5350",
+    "ma10"         : "#FF9800",
+    "ma21"         : "#F23645",
+    "ma50"         : "#089981",
+    "rs_line"      : "#2962FF",
+    "vol_ma"       : "#FF9800",
+    "price_tag_bg" : "#F23645",
     "price_tag_fg" : "#FFFFFF",
-    "52wh"         : "#1A7A3C",
-    "52wl"         : "#D63027",
+    "52wh"         : "#26A69A",
+    "52wl"         : "#EF5350",
 }
 
 
@@ -268,19 +268,11 @@ def draw_chart(symbol, name, df, nifty_df=None):
         col = MS["up"] if is_up else MS["down"]
         bh  = max(abs(closes[i] - opens[i]), price_range * 0.003)
         by  = min(opens[i], closes[i])
-        if is_up:
-            # Hollow green candle
-            ax1.plot([i, i], [lows[i], by],      color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
-            ax1.plot([i, i], [by + bh, highs[i]], color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
-            ax1.add_patch(mpatches.Rectangle(
-                (i - w/2, by), w, bh,
-                facecolor='none', edgecolor=col, linewidth=max(0.8, wick_lw * 0.9), zorder=3))
-        else:
-            # Solid red candle
-            ax1.plot([i, i], [lows[i], highs[i]], color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
-            ax1.add_patch(mpatches.Rectangle(
-                (i - w/2, by), w, bh,
-                facecolor=col, edgecolor=col, linewidth=0.3, zorder=3, alpha=0.90))
+        # Both up and down: solid filled (TradingView style)
+        ax1.plot([i, i], [lows[i], highs[i]], color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
+        ax1.add_patch(mpatches.Rectangle(
+            (i - w/2, by), w, bh,
+            facecolor=col, edgecolor=col, linewidth=0.2, zorder=3, alpha=0.92))
 
     # ── Moving Averages ─────────────────────────────────────────────────────
     for ma_arr, col, lbl, lw in [
