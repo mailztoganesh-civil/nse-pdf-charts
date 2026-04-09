@@ -40,26 +40,26 @@ CONFIG = {
 }
 
 MS = {
-    # ── TradingView Dark Theme ───────────────────────────────────────────────
-    "bg"           : "#131722",   # outer figure background
-    "chart_bg"     : "#131722",   # plot area background
-    "text"         : "#D1D4DC",   # primary labels / symbol name
+    # ── TradingView Light Theme (matches user's screenshot) ─────────────────
+    "bg"           : "#FFFFFF",   # outer figure background
+    "chart_bg"     : "#FFFFFF",   # plot area background
+    "text"         : "#131722",   # primary labels / symbol name
     "text_sec"     : "#787B86",   # secondary / axis tick labels
-    "text_faint"   : "#363C4E",   # very faint (VOL label, etc.)
-    "border"       : "#2A2E39",   # spine / separator lines
-    "grid"         : "#1E2030",   # horizontal grid lines (very subtle)
-    "grid_week"    : "#2A2E39",   # vertical week-separator lines
-    # ── Candles ─────────────────────────────────────────────────────────────
-    "up"           : "#26A69A",   # TradingView teal
-    "down"         : "#EF5350",   # TradingView red
+    "text_faint"   : "#C0C3CC",   # very faint (VOL label)
+    "border"       : "#E0E3EB",   # spine / separator lines
+    "grid"         : "#F0F3FA",   # horizontal grid lines (very subtle)
+    "grid_week"    : "#E0E3EB",   # vertical week-separator lines
+    # ── Candles — blue up, red down (user's TradingView setting) ────────────
+    "up"           : "#2962FF",   # TradingView blue (up candle)
+    "down"         : "#EF5350",   # TradingView red  (down candle)
     # ── Moving Averages ──────────────────────────────────────────────────────
-    "ma10"         : "#F77F00",   # amber-orange  (MA 10)
-    "ma21"         : "#2962FF",   # TradingView blue (MA 21 / EMA 21)
-    "ma50"         : "#9C27B0",   # purple        (MA 50)
+    "ma10"         : "#FF9800",   # orange (MA 10 — kept for reference)
+    "ma21"         : "#F23645",   # red    (EMA 21 — matches screenshot)
+    "ma50"         : "#089981",   # teal   (EMA 50 — matches screenshot)
     # ── Overlays ─────────────────────────────────────────────────────────────
-    "rs_line"      : "#00BCD4",   # cyan  (RS vs NIFTY)
-    "vol_ma"       : "#F77F00",   # same amber as MA10
-    "price_tag_bg" : "#EF5350",   # last-price pill background (red by default)
+    "rs_line"      : "#9C27B0",   # purple (RS vs NIFTY — distinct)
+    "vol_ma"       : "#FF9800",   # amber
+    "price_tag_bg" : "#2962FF",   # last-price pill (blue by default; overridden per candle)
     "price_tag_fg" : "#FFFFFF",
     "52wh"         : "#26A69A",
     "52wl"         : "#EF5350",
@@ -282,6 +282,7 @@ def draw_chart(symbol, name, df, nifty_df=None):
             facecolor=col, edgecolor=col, linewidth=0, zorder=3))
 
     # ── Moving Averages ─────────────────────────────────────────────────────
+    ma_endpoints = []   # collect (value, color) for right-axis pills
     for ma_arr, col, lbl, lw in [
         (ma10, MS["ma10"], 'MA 10', 1.7),
         (ma21, MS["ma21"], 'MA 21', 1.6),
@@ -291,6 +292,7 @@ def draw_chart(symbol, name, df, nifty_df=None):
         if valid.sum() >= 2:
             ax1.plot(xs[valid], ma_arr[valid], color=col, linewidth=lw,
                      label=lbl, zorder=4, alpha=0.95, solid_capstyle='round')
+            ma_endpoints.append((ma_arr[valid][-1], col))
 
     # ── 52W High / Low reference lines ─────────────────────────────────────
     h52 = highs.max();  l52 = lows.min()
@@ -320,14 +322,31 @@ def draw_chart(symbol, name, df, nifty_df=None):
                  transform=ax1.transAxes, color=MS["rs_line"],
                  fontsize=8, ha='right', va='bottom', fontfamily=FONT_MONO, fontweight='bold')
 
-    # ── Last price tag (colour = last candle direction) ─────────────────────
+    # ── Last price tag + MA endpoint pills (right axis, TradingView style) ───
     lp     = closes[-1]
     lp_col = MS["up"] if closes[-1] >= opens[-1] else MS["down"]
-    ax1.axhline(lp, color=lp_col, linewidth=0.5, linestyle=':', alpha=0.4, zorder=1)
-    ax1.text(n + 0.5, lp, f'{RUPEE}{lp:,.0f}' if lp >= 100 else f'{RUPEE}{lp:,.2f}',
+    ax1.axhline(lp, color=lp_col, linewidth=0.6, linestyle=':', alpha=0.55, zorder=1)
+    fmt_v  = lambda v: f'{RUPEE}{v:,.2f}' if v < 100 else f'{RUPEE}{v:,.0f}'
+    # Current price pill
+    ax1.text(n + 0.5, lp, fmt_v(lp),
              color=MS["price_tag_fg"], fontsize=8.5, va='center', fontweight='bold',
              fontfamily=FONT_MONO,
              bbox=dict(facecolor=lp_col, edgecolor='none', boxstyle='round,pad=0.28'))
+    # MA endpoint pills — stacked neatly, no overlap with price pill
+    occupied = [lp]
+    for ma_val, ma_col in sorted(ma_endpoints, key=lambda x: -x[0]):
+        # nudge if too close to an already-placed label
+        pos = ma_val
+        for occ in occupied:
+            if abs(pos - occ) < price_range * 0.028:
+                pos = occ - price_range * 0.030 if pos < occ else occ + price_range * 0.030
+        occupied.append(pos)
+        ax1.plot([n - 1, n + 0.2], [ma_val, ma_val],
+                 color=ma_col, linewidth=0.5, linestyle=':', alpha=0.5, zorder=1)
+        ax1.text(n + 0.5, pos, fmt_v(ma_val),
+                 color='white', fontsize=7.5, va='center', fontweight='bold',
+                 fontfamily=FONT_MONO,
+                 bbox=dict(facecolor=ma_col, edgecolor='none', boxstyle='round,pad=0.22'))
 
     # ── OHLC & change annotation ────────────────────────────────────────────
     chg     = closes[-1] - closes[0]
@@ -372,10 +391,12 @@ def draw_chart(symbol, name, df, nifty_df=None):
     vol_p95   = np.percentile(vols, 95)
     vol_ylim  = max(vol_p95 * 3.5, vol_max * 0.25)
 
+    VOL_UP   = "#26A69A"   # teal  — TradingView volume-up colour
+    VOL_DOWN = "#EF5350"   # red   — TradingView volume-down colour
     for i in range(n):
-        vc = MS["up"] if closes[i] >= opens[i] else MS["down"]
+        vc = VOL_UP if closes[i] >= opens[i] else VOL_DOWN
         ax2.bar(i, min(vols[i], vol_ylim * 0.98),
-                color=vc, width=w * 1.05, alpha=0.65, zorder=2)
+                color=vc, width=w * 1.05, alpha=0.60, zorder=2)
 
     valid_vma = ~np.isnan(vol_ma20)
     if valid_vma.any():
