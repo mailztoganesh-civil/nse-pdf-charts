@@ -614,54 +614,39 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
 
     emit({"type": "progress", "done": 0, "total": total, "message": "Rendering charts..."})
 
-    # ── Step 2: render all charts in parallel (processes bypass GIL) ─────────
-    nifty_dict = nifty_df.to_dict() if nifty_df is not None else None
-    n_workers  = min(CONFIG["render_workers"], max(1, len(symbol_list)))
-
-    worker_args = []
-    no_data_syms = []
+    # ── Step 2: render charts sequentially ───────────────────────────────────
     for sym_yf, sym_nse, name in symbol_list:
-        if sym_yf not in all_data or all_data[sym_yf].empty:
-            no_data_syms.append((sym_yf, sym_nse, name))
-            continue
-        df = all_data[sym_yf]
-        s_dates = (sym_screener_dates or {}).get(sym_nse) or \
-                  (sym_screener_dates or {}).get(sym_yf)
-        worker_args.append((sym_yf, sym_nse, name, df.to_dict(), nifty_dict, s_dates))
-
-    for sym_yf, sym_nse, name in no_data_syms:
         done += 1
-        failed.append((sym_yf, sym_nse, name))
-        emit({"type": "progress", "done": done, "total": total,
-              "message": f"No data: {sym_nse}", "symbol": sym_nse})
-
-    results_map = {}
-    with ProcessPoolExecutor(max_workers=n_workers) as pool:
-        futures = {pool.submit(_render_worker, a): a for a in worker_args}
-        for fut in as_completed(futures):
-            status, sym_yf, sym_nse, name, img_bytes, extra = fut.result()
-            done += 1
-            if status == "ok":
-                results_map[sym_yf] = {
-                    "symbol"    : sym_nse,
-                    "name"      : name,
-                    "img_buf"   : BytesIO(img_bytes),
-                    "last_close": extra["last_close"],
-                    "chg_pct"   : extra["chg_pct"],
-                    "high_52w"  : extra["high_52w"],
-                    "low_52w"   : extra["low_52w"],
-                }
-                emit({"type": "progress", "done": done, "total": total,
-                      "message": f"Charted {sym_nse}", "symbol": sym_nse})
-            else:
-                failed.append((sym_yf, sym_nse, name))
-                emit({"type": "progress", "done": done, "total": total,
-                      "message": f"Chart error: {sym_nse}", "symbol": sym_nse})
-
-    # Preserve original symbol order in the PDF
-    for sym_yf, _, _ in symbol_list:
-        if sym_yf in results_map:
-            chart_data.append(results_map[sym_yf])
+        if sym_yf not in all_data or all_data[sym_yf].empty:
+            failed.append((sym_yf, sym_nse, name))
+            emit({"type": "progress", "done": done, "total": total,
+                  "message": f"No data: {sym_nse}", "symbol": sym_nse})
+            continue
+        try:
+            df      = all_data[sym_yf]
+            closes  = df['Close'].values.astype(float)
+            highs   = df['High'].values.astype(float)
+            lows    = df['Low'].values.astype(float)
+            chg_pct = ((closes[-1] - closes[0]) / closes[0]) * 100
+            s_dates = (sym_screener_dates or {}).get(sym_nse) or \
+                      (sym_screener_dates or {}).get(sym_yf)
+            img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df,
+                                 screener_dates=s_dates)
+            chart_data.append({
+                "symbol"    : sym_nse,
+                "name"      : name,
+                "img_buf"   : img_buf,
+                "last_close": round(float(closes[-1]), 2),
+                "chg_pct"   : round(chg_pct, 2),
+                "high_52w"  : round(float(highs.max()), 2),
+                "low_52w"   : round(float(lows.min()), 2),
+            })
+            emit({"type": "progress", "done": done, "total": total,
+                  "message": f"Charted {sym_nse}", "symbol": sym_nse})
+        except Exception:
+            failed.append((sym_yf, sym_nse, name))
+            emit({"type": "progress", "done": done, "total": total,
+                  "message": f"Chart error: {sym_nse}", "symbol": sym_nse})
 
     if failed:
         for sym_yf, sym_nse, name in failed:
