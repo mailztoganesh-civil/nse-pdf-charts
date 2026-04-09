@@ -40,19 +40,27 @@ CONFIG = {
 }
 
 CLAUDE = {
-    "bg"       : "#F4F3EE",
-    "white"    : "#FFFFFF",
-    "orange"   : "#C15F3C",
-    "cloudy"   : "#B1ADA1",
-    "text"     : "#1A1A18",
-    "text_sec" : "#6B6860",
-    "border"   : "#E5E3DC",
-    "chart_bg" : "#FAFAF7",
-    "up"       : "#2D7D46",
-    "down"     : "#C0392B",
-    "ma20"     : "#C15F3C",
-    "ma50"     : "#6B6860",
-    "grid"     : "#E5E3DC",
+    "bg"        : "#F4F3EE",
+    "white"     : "#FFFFFF",
+    "orange"    : "#C15F3C",
+    "cloudy"    : "#B1ADA1",
+    "text"      : "#1A1A18",
+    "text_sec"  : "#6B6860",
+    "text_faint": "#A09C92",
+    "border"    : "#E5E3DC",
+    "chart_bg"  : "#FAFAF7",
+    "up"        : "#1E8449",
+    "up_alpha"  : "#1E8449",
+    "down"      : "#C0392B",
+    "down_alpha": "#C0392B",
+    "ma20"      : "#D4600A",
+    "ma50"      : "#7B70C7",
+    "vol_ma"    : "#4A9ECA",
+    "rsi_line"  : "#C15F3C",
+    "grid"      : "#E5E3DC",
+    "grid_month": "#D0CCC4",
+    "52wh"      : "#1E8449",
+    "52wl"      : "#C0392B",
 }
 
 
@@ -154,7 +162,13 @@ def fetch_batch(symbols_yf, months=6):
             if len(symbols_yf) == 1:
                 sym = symbols_yf[0]
                 if not raw.empty:
-                    results[sym] = raw.dropna()
+                    # Single-ticker: yfinance returns multi-level columns (Ticker, Price)
+                    # Flatten to single-level (Open, High, Low, Close, Volume)
+                    if isinstance(raw.columns, pd.MultiIndex):
+                        raw.columns = raw.columns.get_level_values(1)
+                    df = raw.dropna()
+                    if len(df) >= 10:
+                        results[sym] = df
             else:
                 for sym in symbols_yf:
                     try:
@@ -170,7 +184,27 @@ def fetch_batch(symbols_yf, months=6):
 
 
 def compute_ma(arr, window):
-    return np.array([np.mean(arr[max(0, i-window+1):i+1]) for i in range(len(arr))])
+    result = np.full(len(arr), np.nan)
+    for i in range(window - 1, len(arr)):
+        result[i] = np.mean(arr[i - window + 1:i + 1])
+    return result
+
+
+def compute_rsi(closes, period=14):
+    deltas = np.diff(closes)
+    gains  = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+    rsi    = np.full(len(closes), np.nan)
+    if len(gains) < period:
+        return rsi
+    avg_gain = np.mean(gains[:period])
+    avg_loss = np.mean(losses[:period])
+    for i in range(period, len(closes)):
+        avg_gain = (avg_gain * (period - 1) + gains[i - 1]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i - 1]) / period
+        rs = avg_gain / avg_loss if avg_loss != 0 else 1e9
+        rsi[i] = 100 - (100 / (1 + rs))
+    return rsi
 
 
 def draw_chart(symbol, name, df):
@@ -185,94 +219,206 @@ def draw_chart(symbol, name, df):
 
     ma20 = compute_ma(closes, 20)
     ma50 = compute_ma(closes, 50)
+    rsi  = compute_rsi(closes, 14)
+    vol_ma20 = compute_ma(vols, 20)
 
-    p_min = lows.min();  p_max = highs.max()
-    pad   = (p_max - p_min) * 0.07
-    y_min = p_min - pad
-    y_max = p_max + pad * 3.5
+    p_min  = lows.min();  p_max = highs.max()
+    price_range = p_max - p_min
+    pad    = price_range * 0.06
+    y_min  = p_min - pad
+    y_max  = p_max + pad * 2.5
 
-    fig = plt.figure(figsize=(18, 9), dpi=CONFIG["chart_dpi"], facecolor=CLAUDE["bg"])
-    gs  = fig.add_gridspec(4, 1, hspace=0.06, left=0.05, right=0.93, top=0.88, bottom=0.08)
-    ax1 = fig.add_subplot(gs[:3, 0])
-    ax2 = fig.add_subplot(gs[3, 0], sharex=ax1)
-    ax1.set_facecolor(CLAUDE["chart_bg"])
-    ax2.set_facecolor(CLAUDE["chart_bg"])
+    high_52w = highs.max()
+    low_52w  = lows.min()
 
-    for i in range(0, n, 10):
-        ax1.axvspan(i, min(i+5, n), alpha=0.025, color=CLAUDE["cloudy"], zorder=0)
+    # Candle width scales with bar count: tighter when more bars
+    w = max(0.35, min(0.65, 60 / max(n, 1)))
 
-    w = 0.55
+    # Month boundary indices for vertical gridlines
+    month_boundaries = []
+    prev_month = None
+    for i, d in enumerate(dates):
+        if d.month != prev_month:
+            if i > 0:
+                month_boundaries.append(i - 0.5)
+            prev_month = d.month
+
+    fig = plt.figure(figsize=(20, 10), dpi=CONFIG["chart_dpi"], facecolor=CLAUDE["bg"])
+
+    # 3-panel layout: price (60%), RSI (18%), volume (22%)
+    gs = fig.add_gridspec(
+        5, 1, hspace=0.0,
+        left=0.055, right=0.935, top=0.895, bottom=0.065,
+        height_ratios=[3, 0.01, 1, 0.01, 1.15]
+    )
+    ax1  = fig.add_subplot(gs[0, 0])          # price
+    ax_r = fig.add_subplot(gs[2, 0], sharex=ax1)  # RSI
+    ax2  = fig.add_subplot(gs[4, 0], sharex=ax1)  # volume
+
+    for ax in (ax1, ax_r, ax2):
+        ax.set_facecolor(CLAUDE["chart_bg"])
+
+    # ── Vertical month separators ──────────────────────────────────────────
+    for ax in (ax1, ax_r, ax2):
+        for mb in month_boundaries:
+            ax.axvline(mb, color=CLAUDE["grid_month"], linewidth=0.7,
+                       linestyle='--', alpha=0.7, zorder=0)
+
+    # ── 52W H/L reference lines ────────────────────────────────────────────
+    if high_52w > y_min:
+        ax1.axhline(high_52w, color=CLAUDE["52wh"], linewidth=0.8,
+                    linestyle=':', alpha=0.55, zorder=1)
+        ax1.text(n + 0.6, high_52w, f'52W H', color=CLAUDE["52wh"],
+                 fontsize=7.5, va='center', fontweight='bold')
+    if low_52w < y_max:
+        ax1.axhline(low_52w, color=CLAUDE["52wl"], linewidth=0.8,
+                    linestyle=':', alpha=0.55, zorder=1)
+        ax1.text(n + 0.6, low_52w, f'52W L', color=CLAUDE["52wl"],
+                 fontsize=7.5, va='center', fontweight='bold')
+
+    # ── Candlestick bodies & wicks ─────────────────────────────────────────
+    wick_lw = max(0.6, min(1.1, 45 / max(n, 1)))
     for i in range(n):
         is_up = closes[i] >= opens[i]
         col   = CLAUDE["up"] if is_up else CLAUDE["down"]
-        ax1.plot([i, i], [lows[i], highs[i]], color=col, linewidth=0.8, zorder=2, alpha=0.9)
-        bh = max(abs(closes[i] - opens[i]), p_min * 0.0004)
+        # Wick
+        ax1.plot([i, i], [lows[i], highs[i]], color=col,
+                 linewidth=wick_lw, zorder=2, solid_capstyle='round')
+        # Body
+        bh = max(abs(closes[i] - opens[i]), price_range * 0.0015)
         by = min(opens[i], closes[i])
-        ax1.add_patch(mpatches.Rectangle(
-            (i - w/2, by), w, bh,
-            facecolor=col, edgecolor='none', zorder=3, alpha=0.88))
+        if is_up:
+            ax1.add_patch(mpatches.Rectangle(
+                (i - w/2, by), w, bh,
+                facecolor=col, edgecolor=col, linewidth=0.3, zorder=3, alpha=0.90))
+        else:
+            ax1.add_patch(mpatches.Rectangle(
+                (i - w/2, by), w, bh,
+                facecolor=col, edgecolor=col, linewidth=0.3, zorder=3, alpha=0.85))
 
-    ax1.plot(range(n), ma20, color=CLAUDE["ma20"], linewidth=1.6, label='MA 20', zorder=4, alpha=0.9)
-    ax1.plot(range(n), ma50, color=CLAUDE["ma50"], linewidth=1.4, label='MA 50', zorder=4, alpha=0.8, linestyle='--')
+    # ── Moving averages ────────────────────────────────────────────────────
+    valid20 = ~np.isnan(ma20)
+    valid50 = ~np.isnan(ma50)
+    xs = np.arange(n)
+    if valid20.any():
+        ax1.plot(xs[valid20], ma20[valid20], color=CLAUDE["ma20"],
+                 linewidth=1.7, label='MA 20', zorder=4, alpha=0.92)
+    if valid50.any():
+        ax1.plot(xs[valid50], ma50[valid50], color=CLAUDE["ma50"],
+                 linewidth=1.5, label='MA 50', zorder=4, alpha=0.85, linestyle='--')
 
+    # ── Last price tag ─────────────────────────────────────────────────────
     lp = closes[-1]
-    ax1.axhline(lp, color=CLAUDE["orange"], linewidth=0.8, linestyle=':', alpha=0.6, zorder=1)
-    ax1.text(n + 0.5, lp, f'\u20b9{lp:,.2f}',
-             color=CLAUDE["white"], fontsize=9, va='center', fontweight='bold',
-             bbox=dict(facecolor=CLAUDE["orange"], edgecolor='none', boxstyle='round,pad=0.35'))
+    ax1.axhline(lp, color=CLAUDE["orange"], linewidth=0.75, linestyle=':', alpha=0.5, zorder=1)
+    ax1.text(n + 0.5, lp, f'{RUPEE}{lp:,.2f}',
+             color=CLAUDE["white"], fontsize=8.5, va='center', fontweight='bold',
+             bbox=dict(facecolor=CLAUDE["orange"], edgecolor='none',
+                       boxstyle='round,pad=0.32'))
 
+    # ── Price change annotation ────────────────────────────────────────────
     chg     = closes[-1] - closes[0]
     chg_pct = (chg / closes[0]) * 100
-    arrow   = '\u25b2' if chg >= 0 else '\u25bc'
+    arrow   = UP_ARROW if chg >= 0 else DOWN_ARROW
     chg_col = CLAUDE["up"] if chg >= 0 else CLAUDE["down"]
-    info = (f"Open {RUPEE}{opens[-1]:,.2f}   {DOT}   High {RUPEE}{highs.max():,.2f}   {DOT}   "
-            f"Low {RUPEE}{lows.min():,.2f}   {DOT}   Close {RUPEE}{closes[-1]:,.2f}")
-    ax1.text(0.01, 0.975, info, transform=ax1.transAxes,
-             color=CLAUDE["text_sec"], fontsize=8.5, va='top', fontfamily='serif')
-    ax1.text(0.58, 0.975, f"{arrow} {RUPEE}{abs(chg):.2f}  ({abs(chg_pct):.2f}%)",
-             transform=ax1.transAxes,
-             color=chg_col, fontsize=8.5, va='top', fontweight='bold')
+    info = (f"O {RUPEE}{opens[-1]:,.2f}   {DOT}   H {RUPEE}{highs.max():,.2f}   {DOT}   "
+            f"L {RUPEE}{lows.min():,.2f}   {DOT}   C {RUPEE}{closes[-1]:,.2f}")
+    ax1.text(0.005, 0.978, info, transform=ax1.transAxes,
+             color=CLAUDE["text_sec"], fontsize=8, va='top',
+             fontfamily='monospace')
+    ax1.text(0.60, 0.978, f"{arrow} {RUPEE}{abs(chg):,.2f}  ({abs(chg_pct):.2f}%)",
+             transform=ax1.transAxes, color=chg_col,
+             fontsize=8.5, va='top', fontweight='bold')
 
-    ax1.yaxis.grid(True, color=CLAUDE["grid"], linewidth=0.6, linestyle='-', zorder=0)
+    # ── Price axis styling ─────────────────────────────────────────────────
+    ax1.yaxis.grid(True, color=CLAUDE["grid"], linewidth=0.5, linestyle='-', zorder=0)
     ax1.xaxis.grid(False)
     ax1.set_axisbelow(True)
     for spine in ax1.spines.values():
-        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.8)
-    ax1.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=9,
-                    right=True, labelright=True, labelleft=False, length=3, width=0.5)
+        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.7)
+    ax1.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=8.5,
+                    right=True, labelright=True, labelleft=False,
+                    length=3, width=0.5, pad=3)
+    ax1.yaxis.set_major_formatter(plt.FuncFormatter(
+        lambda x, _: f'{RUPEE}{x:,.0f}' if x >= 100 else f'{RUPEE}{x:,.2f}'))
     ax1.tick_params(axis='x', bottom=False, labelbottom=False, length=0)
     ax1.set_ylim(y_min, y_max)
-    ax1.set_xlim(-1, n + 3)
+    ax1.set_xlim(-1, n + 5.5)
     ax1.legend(facecolor=CLAUDE["white"], edgecolor=CLAUDE["border"],
-               labelcolor=CLAUDE["text_sec"], fontsize=9,
-               loc='upper left', bbox_to_anchor=(0.01, 0.91),
-               framealpha=1, borderpad=0.6)
+               labelcolor=CLAUDE["text_sec"], fontsize=8.5,
+               loc='upper left', bbox_to_anchor=(0.005, 0.91),
+               framealpha=0.95, borderpad=0.5, handlelength=1.8)
 
-    period = f"{dates[0].strftime('%d %b %Y')} {ENDASH} {dates[-1].strftime('%d %b %Y')}"
-    fig.text(0.05, 0.955, symbol, color=CLAUDE["text"], fontsize=15, fontweight='bold', fontfamily='serif')
-    fig.text(0.05 + len(symbol) * 0.013, 0.956, f'  {DOT}  {name}',
-             color=CLAUDE["text_sec"], fontsize=10, fontfamily='serif', va='bottom')
-    fig.text(0.93, 0.955, period, color=CLAUDE["text_sec"], fontsize=9, ha='right', fontfamily='serif')
+    # ── RSI panel ──────────────────────────────────────────────────────────
+    valid_rsi = ~np.isnan(rsi)
+    if valid_rsi.any():
+        ax_r.plot(xs[valid_rsi], rsi[valid_rsi], color=CLAUDE["rsi_line"],
+                  linewidth=1.3, zorder=3, alpha=0.9)
+        ax_r.axhline(70, color=CLAUDE["down"], linewidth=0.7, linestyle='--', alpha=0.5)
+        ax_r.axhline(30, color=CLAUDE["up"],   linewidth=0.7, linestyle='--', alpha=0.5)
+        ax_r.axhline(50, color=CLAUDE["text_faint"], linewidth=0.5, linestyle=':', alpha=0.4)
+        ax_r.fill_between(xs[valid_rsi], rsi[valid_rsi], 70,
+                           where=(rsi[valid_rsi] >= 70),
+                           color=CLAUDE["down"], alpha=0.12, zorder=1)
+        ax_r.fill_between(xs[valid_rsi], rsi[valid_rsi], 30,
+                           where=(rsi[valid_rsi] <= 30),
+                           color=CLAUDE["up"], alpha=0.12, zorder=1)
+        last_rsi = rsi[valid_rsi][-1]
+        ax_r.text(n + 0.5, last_rsi, f'{last_rsi:.0f}',
+                  color=CLAUDE["rsi_line"], fontsize=7.5, va='center', fontweight='bold')
+    ax_r.set_ylim(10, 90)
+    ax_r.set_yticks([30, 50, 70])
+    ax_r.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=7.5,
+                     right=True, labelright=True, labelleft=False, length=2, width=0.5)
+    ax_r.yaxis.grid(True, color=CLAUDE["grid"], linewidth=0.4, zorder=0)
+    ax_r.set_axisbelow(True)
+    for spine in ax_r.spines.values():
+        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.5)
+    ax_r.tick_params(axis='x', bottom=False, labelbottom=False, length=0)
+    ax_r.text(-0.5, 50, 'RSI 14', color=CLAUDE["text_sec"],
+              fontsize=7, ha='right', va='center')
 
+    # ── Volume panel ───────────────────────────────────────────────────────
     for i in range(n):
         vc = CLAUDE["up"] if closes[i] >= opens[i] else CLAUDE["down"]
-        ax2.bar(i, vols[i], color=vc, width=0.7, alpha=0.35, zorder=2)
+        ax2.bar(i, vols[i], color=vc, width=w * 1.15, alpha=0.4, zorder=2)
+    valid_vma = ~np.isnan(vol_ma20)
+    if valid_vma.any():
+        ax2.plot(xs[valid_vma], vol_ma20[valid_vma], color=CLAUDE["vol_ma"],
+                 linewidth=1.3, zorder=3, alpha=0.85, label='Vol MA20')
     ax2.yaxis.grid(True, color=CLAUDE["grid"], linewidth=0.4, zorder=0)
     ax2.set_axisbelow(True)
     for spine in ax2.spines.values():
-        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.6)
-    ax2.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=7.5, length=3)
-    ax2.set_ylabel('Volume', color=CLAUDE["text_sec"], fontsize=8, labelpad=6)
-    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x/1e6:.1f}M'))
-    ax2.set_ylim(0, vols.max() * 1.5)
+        spine.set_color(CLAUDE["border"]); spine.set_linewidth(0.5)
+    ax2.tick_params(axis='y', colors=CLAUDE["text_sec"], labelsize=7.5,
+                    right=True, labelright=True, labelleft=False, length=2, width=0.5)
+    vol_max = vols.max()
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(
+        lambda x, _: f'{x/1e7:.1f}Cr' if vol_max > 5e6 else f'{x/1e5:.0f}L'))
+    ax2.set_ylim(0, vol_max * 1.6)
+    ax2.text(-0.5, vol_max * 0.5, 'VOL', color=CLAUDE["text_sec"],
+             fontsize=7, ha='right', va='center')
+
+    # ── X-axis date ticks (bottom of volume panel) ─────────────────────────
     tick_pos = [i for i in range(n) if dates[i].day <= 5]
     tick_lbl = [dates[i].strftime('%b %y') for i in tick_pos]
     ax2.set_xticks(tick_pos)
     ax2.set_xticklabels(tick_lbl, color=CLAUDE["text_sec"], fontsize=8)
     ax2.tick_params(axis='x', length=3, width=0.5, color=CLAUDE["border"])
+    ax2.set_xlim(-1, n + 5.5)
+
+    # ── Figure header ──────────────────────────────────────────────────────
+    period = f"{dates[0].strftime('%d %b %Y')} {ENDASH} {dates[-1].strftime('%d %b %Y')}"
+    fig.text(0.055, 0.957, symbol,
+             color=CLAUDE["text"], fontsize=16, fontweight='bold', fontfamily='serif')
+    name_x = 0.055 + len(symbol) * 0.0115
+    fig.text(name_x, 0.958, f'  {DOT}  {name}',
+             color=CLAUDE["text_sec"], fontsize=10.5, fontfamily='serif', va='bottom')
+    fig.text(0.935, 0.957, period,
+             color=CLAUDE["text_sec"], fontsize=8.5, ha='right', fontfamily='serif')
 
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=CONFIG["chart_dpi"], bbox_inches='tight', facecolor=CLAUDE["bg"])
+    plt.savefig(buf, format='png', dpi=CONFIG["chart_dpi"],
+                bbox_inches='tight', facecolor=CLAUDE["bg"])
     plt.close()
     buf.seek(0)
     return buf
