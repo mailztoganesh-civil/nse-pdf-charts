@@ -300,7 +300,7 @@ def draw_chart(symbol, name, df, nifty_df=None, screener_dates=None):
                 ax1.annotate('▲',
                              xy=(i, y_pos),
                              ha='center', va='top',
-                             fontsize=10, color=arrow_col,
+                             fontsize=40, color=arrow_col,
                              fontweight='bold', zorder=6)
 
     # ── Moving Averages ─────────────────────────────────────────────────────
@@ -454,10 +454,10 @@ def draw_chart(symbol, name, df, nifty_df=None, screener_dates=None):
     # ── Figure header ──────────────────────────────────────────────────────
     period = f"{dates[0].strftime('%d %b %Y')} {ENDASH} {dates[-1].strftime('%d %b %Y')}"
     fig.text(0.015, 0.963, symbol,
-             color=MS["text"], fontsize=16, fontweight='bold', fontfamily=FONT_MONO)
-    sym_w = len(symbol) * 0.0093
+             color=MS["text"], fontsize=52, fontweight='bold', fontfamily=FONT_MONO)
+    sym_w = len(symbol) * 0.028
     fig.text(0.015 + sym_w, 0.963, f'  {DOT}  {name}',
-             color=MS["text_sec"], fontsize=10.5, fontfamily=FONT, va='center')
+             color=MS["text_sec"], fontsize=36, fontfamily=FONT, va='center')
     fig.text(0.915, 0.963, period,
              color=MS["text_sec"], fontsize=8.5, ha='right', fontfamily=FONT, va='center')
 
