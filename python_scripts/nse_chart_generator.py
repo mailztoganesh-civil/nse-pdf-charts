@@ -145,8 +145,8 @@ def get_nse_symbols():
 
 def fetch_batch(symbols_yf, months=6):
     """Download OHLCV for a batch. Returns {symbol: DataFrame}."""
-    end   = datetime.today()
-    start = end - timedelta(days=months * 31)
+    end   = datetime.today() + timedelta(days=1)   # exclusive — +1 to include today
+    start = end - timedelta(days=months * 31 + 1)
     results = {}
 
     for attempt in range(CONFIG["retry_attempts"]):
@@ -546,8 +546,8 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
     # Fetch NIFTY 50 once upfront for the RS Line indicator
     nifty_df = None
     try:
-        n_end   = datetime.today()
-        n_start = n_end - timedelta(days=history_months * 31 + 30)
+        n_end   = datetime.today() + timedelta(days=1)   # exclusive — +1 to include today
+        n_start = n_end - timedelta(days=history_months * 31 + 31)
         nraw = yf.download(
             "^NSEI",
             start=n_start.strftime("%Y-%m-%d"),
