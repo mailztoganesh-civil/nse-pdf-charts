@@ -6,11 +6,102 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { useGenerateAllNse, useGenerateFromCsv, useGetJob, getGetJobQueryKey } from "@workspace/api-client-react";
-import { UploadCloud, File, Play, Download, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { UploadCloud, File, Play, Download, AlertCircle, CheckCircle2, Loader2, CalendarIcon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Job, CsvParseResult } from "@workspace/api-client-react/src/generated/api.schemas";
+
+function ScreenerDatePicker({
+  label,
+  value,
+  onChange,
+  screenerDates,
+  minDate,
+  maxDate,
+  testId,
+}: {
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  screenerDates: Date[];
+  minDate: string;
+  maxDate: string;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? new Date(value + "T00:00:00") : undefined;
+  const min = minDate ? new Date(minDate + "T00:00:00") : undefined;
+  const max = maxDate ? new Date(maxDate + "T00:00:00") : undefined;
+
+  return (
+    <div className="space-y-2">
+      <Label className="font-mono text-xs text-muted-foreground">{label}</Label>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            data-testid={testId}
+            className="w-full justify-start font-mono text-sm h-9"
+          >
+            <CalendarIcon className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+            {value || <span className="text-muted-foreground">Pick a date</span>}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <style>{`
+            .rdp-day[data-screener="true"] {
+              position: relative;
+            }
+            .rdp-day[data-screener="true"]::after {
+              content: '';
+              position: absolute;
+              bottom: 2px;
+              left: 50%;
+              transform: translateX(-50%);
+              width: 4px;
+              height: 4px;
+              border-radius: 50%;
+              background: hsl(var(--primary));
+            }
+          `}</style>
+          <Calendar
+            mode="single"
+            selected={selected}
+            onSelect={(date) => {
+              if (date) {
+                const y = date.getFullYear();
+                const m = String(date.getMonth() + 1).padStart(2, "0");
+                const d = String(date.getDate()).padStart(2, "0");
+                onChange(`${y}-${m}-${d}`);
+              }
+              setOpen(false);
+            }}
+            disabled={(date) => {
+              if (min && date < min) return true;
+              if (max && date > max) return true;
+              return false;
+            }}
+            modifiers={{ screener: screenerDates }}
+            modifiersStyles={{
+              screener: {
+                fontWeight: "700",
+                color: "hsl(var(--primary))",
+                textDecoration: "underline",
+                textDecorationColor: "hsl(var(--primary))",
+                textUnderlineOffset: "3px",
+              },
+            }}
+            captionLayout="dropdown"
+            defaultMonth={selected ?? max}
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
 
 function ActiveJobView({ jobId, onReset }: { jobId: string, onReset: () => void }) {
   const queryClient = useQueryClient();
@@ -154,6 +245,12 @@ export default function Home() {
     }
     return [...result].sort();
   }, [parseResult, startDate, endDate]);
+
+  // Convert screener dates (YYYY-MM-DD strings) to Date objects for calendar highlighting
+  const screenerDates = useMemo(() => {
+    if (!parseResult?.dates) return [];
+    return parseResult.dates.map((d) => new Date(d + "T00:00:00"));
+  }, [parseResult]);
 
   const handleGenerateAll = () => {
     generateAllMutation.mutate(
@@ -374,30 +471,24 @@ export default function Home() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="font-mono text-xs text-muted-foreground">Start Date</Label>
-                      <Input 
-                        type="date" 
-                        value={startDate} 
-                        onChange={(e) => setStartDate(e.target.value)} 
-                        min={parseResult.minDate}
-                        max={parseResult.maxDate}
-                        className="font-mono"
-                        data-testid="input-start-date"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="font-mono text-xs text-muted-foreground">End Date</Label>
-                      <Input 
-                        type="date" 
-                        value={endDate} 
-                        onChange={(e) => setEndDate(e.target.value)} 
-                        min={parseResult.minDate}
-                        max={parseResult.maxDate}
-                        className="font-mono"
-                        data-testid="input-end-date"
-                      />
-                    </div>
+                    <ScreenerDatePicker
+                      label="Start Date"
+                      value={startDate}
+                      onChange={setStartDate}
+                      screenerDates={screenerDates}
+                      minDate={parseResult.minDate}
+                      maxDate={parseResult.maxDate}
+                      testId="input-start-date"
+                    />
+                    <ScreenerDatePicker
+                      label="End Date"
+                      value={endDate}
+                      onChange={setEndDate}
+                      screenerDates={screenerDates}
+                      minDate={parseResult.minDate}
+                      maxDate={parseResult.maxDate}
+                      testId="input-end-date"
+                    />
                   </div>
 
                   <div className="space-y-2">
