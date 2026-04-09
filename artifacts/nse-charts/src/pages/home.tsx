@@ -400,6 +400,23 @@ export default function Home() {
                     </div>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label htmlFor="csv-history-months" className="font-mono text-xs text-muted-foreground uppercase tracking-widest">Chart History</Label>
+                    <div className="flex items-center gap-4">
+                      <Input
+                        id="csv-history-months"
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={historyMonths}
+                        onChange={(e) => setHistoryMonths(e.target.value)}
+                        className="w-32 font-mono"
+                        data-testid="input-csv-history-months"
+                      />
+                      <span className="text-sm text-muted-foreground font-mono">months of price history per chart</span>
+                    </div>
+                  </div>
+
                   <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 font-mono text-sm text-center">
                     <span className="text-primary font-bold text-lg">{filteredStocks.length}</span>
                     <span className="text-muted-foreground ml-2">stocks in selected date range</span>
