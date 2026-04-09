@@ -54,6 +54,7 @@ export const ParseCsvBody = zod.object({
 
 export const ParseCsvResponse = zod.object({
   stocks: zod.array(zod.string()),
+  stocksByDate: zod.record(zod.string(), zod.array(zod.string())),
   dates: zod.array(zod.string()),
   minDate: zod.string(),
   maxDate: zod.string(),

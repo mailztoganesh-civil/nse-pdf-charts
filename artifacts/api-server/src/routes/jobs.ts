@@ -248,39 +248,46 @@ router.post("/jobs/parse-csv", upload.single("file"), async (req, res): Promise<
       return;
     }
 
-    const stocks = new Set<string>();
-    const dateSet = new Set<string>();
+    const stocksByDate: Record<string, Set<string>> = {};
+    const allStocks = new Set<string>();
+
+    function parseIsoDate(rawDate: string): string | null {
+      if (!rawDate) return null;
+      const dmyMatch = rawDate.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+      if (dmyMatch) {
+        const [, dd, mm, yyyy] = dmyMatch;
+        const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+        if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      }
+      const d = new Date(rawDate);
+      return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    }
 
     for (const line of lines.slice(1)) {
       const cells = parseCsvLine(line);
       const sym = (cells[symIdx] ?? "").trim().toUpperCase().replace(/[^A-Z0-9&.\-]/g, "");
-      if (sym.length >= 1 && sym.length <= 20) stocks.add(sym);
+      if (sym.length < 1 || sym.length > 20) continue;
+      allStocks.add(sym);
 
       if (dateIdx >= 0) {
-        const rawDate = (cells[dateIdx] ?? "").trim();
-        if (rawDate) {
-          // Handle DD-MM-YYYY and DD/MM/YYYY (Indian screener format)
-          const dmyMatch = rawDate.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
-          let iso: string | null = null;
-          if (dmyMatch) {
-            const [, dd, mm, yyyy] = dmyMatch;
-            const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
-            if (!isNaN(d.getTime())) iso = d.toISOString().slice(0, 10);
-          }
-          if (!iso) {
-            const d = new Date(rawDate);
-            if (!isNaN(d.getTime())) iso = d.toISOString().slice(0, 10);
-          }
-          if (iso) dateSet.add(iso);
+        const iso = parseIsoDate((cells[dateIdx] ?? "").trim());
+        if (iso) {
+          if (!stocksByDate[iso]) stocksByDate[iso] = new Set();
+          stocksByDate[iso].add(sym);
         }
       }
     }
 
-    const sortedStocks = [...stocks].sort();
-    const sortedDates  = [...dateSet].sort();
+    const sortedStocks = [...allStocks].sort();
+    const sortedDates  = Object.keys(stocksByDate).sort();
+    const stocksByDateArr: Record<string, string[]> = {};
+    for (const [date, syms] of Object.entries(stocksByDate)) {
+      stocksByDateArr[date] = [...syms].sort();
+    }
 
     res.json({
       stocks: sortedStocks,
+      stocksByDate: stocksByDateArr,
       dates: sortedDates,
       minDate: sortedDates[0] ?? "",
       maxDate: sortedDates[sortedDates.length - 1] ?? "",

@@ -196,6 +196,12 @@ components:
           type: array
           items:
             type: string
+        stocksByDate:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
         dates:
           type: array
           items:
@@ -208,6 +214,7 @@ components:
           type: integer
       required:
         - stocks
+        - stocksByDate
         - dates
         - minDate
         - maxDate

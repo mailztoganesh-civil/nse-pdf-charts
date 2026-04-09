@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -143,6 +143,18 @@ export default function Home() {
   const [endDate, setEndDate] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Compute stocks for the selected date range from stocksByDate map
+  const filteredStocks = useMemo(() => {
+    if (!parseResult?.stocksByDate || !startDate || !endDate) return parseResult?.stocks ?? [];
+    const result = new Set<string>();
+    for (const [date, syms] of Object.entries(parseResult.stocksByDate)) {
+      if (date >= startDate && date <= endDate) {
+        for (const s of syms) result.add(s);
+      }
+    }
+    return [...result].sort();
+  }, [parseResult, startDate, endDate]);
+
   const handleGenerateAll = () => {
     generateAllMutation.mutate(
       { data: { historyMonths: parseInt(historyMonths, 10) || 6, letterFilter } },
@@ -198,12 +210,12 @@ export default function Home() {
   };
 
   const handleGenerateCsv = () => {
-    if (!parseResult || !startDate || !endDate) return;
+    if (!parseResult || !startDate || !endDate || filteredStocks.length === 0) return;
 
     generateCsvMutation.mutate(
       { 
         data: { 
-          stocks: parseResult.stocks, 
+          stocks: filteredStocks,
           startDate, 
           endDate, 
           historyMonths: parseInt(historyMonths, 10) || 6 
@@ -348,7 +360,9 @@ export default function Home() {
                       <File className="w-8 h-8 text-primary" />
                       <div>
                         <div className="font-mono font-bold text-sm">{csvFile?.name}</div>
-                        <div className="font-mono text-xs text-muted-foreground">Found {parseResult.stocks.length} valid symbols</div>
+                        <div className="font-mono text-xs text-muted-foreground">
+                          {parseResult.stocks.length} unique symbols across {parseResult.dates.length} dates
+                        </div>
                       </div>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => {
@@ -386,14 +400,19 @@ export default function Home() {
                     </div>
                   </div>
 
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 font-mono text-sm text-center">
+                    <span className="text-primary font-bold text-lg">{filteredStocks.length}</span>
+                    <span className="text-muted-foreground ml-2">stocks in selected date range</span>
+                  </div>
+
                   <Button 
                     onClick={handleGenerateCsv} 
-                    disabled={generateCsvMutation.isPending || !startDate || !endDate}
+                    disabled={generateCsvMutation.isPending || !startDate || !endDate || filteredStocks.length === 0}
                     className="w-full font-mono font-bold h-12"
                     data-testid="button-generate-csv"
                   >
                     {generateCsvMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                    GENERATE CUSTOM PDF
+                    GENERATE PDF ({filteredStocks.length} STOCKS)
                   </Button>
                 </div>
               )}

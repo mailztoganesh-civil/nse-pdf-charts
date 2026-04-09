@@ -45,8 +45,11 @@ export interface GenerateAllRequest {
   letterFilter?: string;
 }
 
+export type CsvParseResultStocksByDate = { [key: string]: string[] };
+
 export interface CsvParseResult {
   stocks: string[];
+  stocksByDate: CsvParseResultStocksByDate;
   dates: string[];
   minDate: string;
   maxDate: string;

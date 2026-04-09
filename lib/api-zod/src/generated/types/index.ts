@@ -7,6 +7,7 @@
  */
 
 export * from "./csvParseResult";
+export * from "./csvParseResultStocksByDate";
 export * from "./generateAllRequest";
 export * from "./generateCsvRequest";
 export * from "./healthStatus";
