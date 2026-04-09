@@ -227,9 +227,9 @@ def draw_chart(symbol, name, df, nifty_df=None):
     y_min = p_min - pad
     y_max = p_max + pad * 2.2
 
-    # Candle width adapts to bar density
-    w       = max(0.38, min(0.70, 65 / max(n, 1)))
-    wick_lw = max(0.7,  min(1.3,  55 / max(n, 1)))
+    # Candle width adapts to bar density — kept wide for visibility
+    w       = max(0.60, min(0.88, 90 / max(n, 1)))
+    wick_lw = max(1.0,  min(1.8,  75 / max(n, 1)))
 
     # Week boundaries (every ~5 trading days)
     week_bdry = [i - 0.5 for i in range(1, n) if i % 5 == 0]
@@ -266,7 +266,7 @@ def draw_chart(symbol, name, df, nifty_df=None):
     for i in range(n):
         is_up = closes[i] >= opens[i]
         col = MS["up"] if is_up else MS["down"]
-        bh  = max(abs(closes[i] - opens[i]), price_range * 0.0018)
+        bh  = max(abs(closes[i] - opens[i]), price_range * 0.003)
         by  = min(opens[i], closes[i])
         if is_up:
             # Hollow green candle
