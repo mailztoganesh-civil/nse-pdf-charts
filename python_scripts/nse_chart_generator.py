@@ -243,7 +243,7 @@ def draw_chart(symbol, name, df, nifty_df=None):
     gs  = fig.add_gridspec(
         2, 1, hspace=0.0,
         left=0.01, right=0.915, top=0.905, bottom=0.065,
-        height_ratios=[4.2, 1.3]
+        height_ratios=[3.5, 1.0]
     )
     ax1 = fig.add_subplot(gs[0, 0])
     ax2 = fig.add_subplot(gs[1, 0], sharex=ax1)
@@ -350,24 +350,32 @@ def draw_chart(symbol, name, df, nifty_df=None):
                framealpha=0.85, borderpad=0.5, handlelength=1.6, ncol=3)
 
     # ── Volume panel ───────────────────────────────────────────────────────
-    vol_max = vols.max()
+    vol_max   = vols.max()
+    # Cap axis at 3× the 95th-percentile so one spike doesn't crush all bars
+    vol_p95   = np.percentile(vols, 95)
+    vol_ylim  = max(vol_p95 * 3.5, vol_max * 0.25)
+
     for i in range(n):
-        vc    = MS["up"] if closes[i] >= opens[i] else MS["down"]
-        alpha = 0.50 if closes[i] >= opens[i] else 0.70
-        ax2.bar(i, vols[i], color=vc, width=w * 1.1, alpha=alpha, zorder=2)
+        vc = MS["up"] if closes[i] >= opens[i] else MS["down"]
+        ax2.bar(i, min(vols[i], vol_ylim * 0.98),   # clip spike tops
+                color=vc, width=w * 1.05, alpha=0.75, zorder=2)
+
     valid_vma = ~np.isnan(vol_ma20)
     if valid_vma.any():
         ax2.plot(xs[valid_vma], vol_ma20[valid_vma], color=MS["vol_ma"],
-                 linewidth=1.3, zorder=3, alpha=0.90)
-    ax2.set_ylim(0, vol_max * 1.9)
+                 linewidth=1.5, zorder=3, alpha=0.95)
+
+    ax2.set_ylim(0, vol_ylim)
+    ax2.yaxis.grid(True, color=MS["grid"], linewidth=0.4, zorder=0)
+    ax2.set_axisbelow(True)
     ax2.tick_params(axis='y', colors=MS["text_sec"], labelsize=7.5,
                     right=True, labelright=True, labelleft=False, length=2, width=0.5)
     ax2.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda x, _: f'{x/1e7:.1f}Cr' if vol_max > 5e6 else f'{x/1e5:.0f}L'))
     for sp in ax2.spines.values():
         sp.set_color(MS["border"]);  sp.set_linewidth(0.5)
-    ax2.text(0.005, 0.85, 'VOL', transform=ax2.transAxes,
-             color=MS["text_faint"], fontsize=7.5, va='top', fontfamily='monospace')
+    ax2.text(0.005, 0.88, 'VOLUME', transform=ax2.transAxes,
+             color=MS["text_faint"], fontsize=7, va='top', fontfamily='monospace')
 
     # ── X-axis month labels ────────────────────────────────────────────────
     ax2.set_xticks(month_ticks)
