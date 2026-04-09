@@ -257,12 +257,21 @@ router.post("/jobs/parse-csv", upload.single("file"), async (req, res): Promise<
       if (sym.length >= 1 && sym.length <= 20) stocks.add(sym);
 
       if (dateIdx >= 0) {
-        const raw = (cells[dateIdx] ?? "").trim();
-        if (raw) {
-          const d = new Date(raw);
-          if (!isNaN(d.getTime())) {
-            dateSet.add(d.toISOString().slice(0, 10));
+        const rawDate = (cells[dateIdx] ?? "").trim();
+        if (rawDate) {
+          // Handle DD-MM-YYYY and DD/MM/YYYY (Indian screener format)
+          const dmyMatch = rawDate.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+          let iso: string | null = null;
+          if (dmyMatch) {
+            const [, dd, mm, yyyy] = dmyMatch;
+            const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+            if (!isNaN(d.getTime())) iso = d.toISOString().slice(0, 10);
           }
+          if (!iso) {
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime())) iso = d.toISOString().slice(0, 10);
+          }
+          if (iso) dateSet.add(iso);
         }
       }
     }

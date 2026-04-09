@@ -181,7 +181,8 @@ export default function Home() {
       
       const result: CsvParseResult = await response.json();
       setParseResult(result);
-      setStartDate(result.minDate);
+      // Default to latest date for both start and end
+      setStartDate(result.maxDate);
       setEndDate(result.maxDate);
     } catch (error) {
       toast({
