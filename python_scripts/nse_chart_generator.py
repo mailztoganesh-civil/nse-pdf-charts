@@ -40,22 +40,26 @@ CONFIG = {
 }
 
 MS = {
-    "bg"           : "#FFFFFF",
-    "chart_bg"     : "#FFFFFF",
-    "text"         : "#1A1A1A",
-    "text_sec"     : "#555555",
-    "text_faint"   : "#AAAAAA",
-    "border"       : "#E0E0E0",
-    "grid"         : "#F5F5F5",
-    "grid_week"    : "#EBEBEB",
-    "up"           : "#26A69A",
-    "down"         : "#EF5350",
-    "ma10"         : "#FF9800",
-    "ma21"         : "#F23645",
-    "ma50"         : "#089981",
-    "rs_line"      : "#2962FF",
-    "vol_ma"       : "#FF9800",
-    "price_tag_bg" : "#F23645",
+    # ── TradingView Dark Theme ───────────────────────────────────────────────
+    "bg"           : "#131722",   # outer figure background
+    "chart_bg"     : "#131722",   # plot area background
+    "text"         : "#D1D4DC",   # primary labels / symbol name
+    "text_sec"     : "#787B86",   # secondary / axis tick labels
+    "text_faint"   : "#363C4E",   # very faint (VOL label, etc.)
+    "border"       : "#2A2E39",   # spine / separator lines
+    "grid"         : "#1E2030",   # horizontal grid lines (very subtle)
+    "grid_week"    : "#2A2E39",   # vertical week-separator lines
+    # ── Candles ─────────────────────────────────────────────────────────────
+    "up"           : "#26A69A",   # TradingView teal
+    "down"         : "#EF5350",   # TradingView red
+    # ── Moving Averages ──────────────────────────────────────────────────────
+    "ma10"         : "#F77F00",   # amber-orange  (MA 10)
+    "ma21"         : "#2962FF",   # TradingView blue (MA 21 / EMA 21)
+    "ma50"         : "#9C27B0",   # purple        (MA 50)
+    # ── Overlays ─────────────────────────────────────────────────────────────
+    "rs_line"      : "#00BCD4",   # cyan  (RS vs NIFTY)
+    "vol_ma"       : "#F77F00",   # same amber as MA10
+    "price_tag_bg" : "#EF5350",   # last-price pill background (red by default)
     "price_tag_fg" : "#FFFFFF",
     "52wh"         : "#26A69A",
     "52wl"         : "#EF5350",
@@ -238,7 +242,10 @@ def draw_chart(symbol, name, df, nifty_df=None):
     month_ticks = [i for i in range(n)
                    if i == 0 or dates[i].month != dates[i - 1].month]
 
-    # ── Figure: 2 panels, dark background ─────────────────────────────────
+    FONT     = 'DejaVu Sans'
+    FONT_MONO= 'DejaVu Sans Mono'
+
+    # ── Figure: 2 panels, TradingView dark background ──────────────────────
     fig = plt.figure(figsize=(22, 11), dpi=CONFIG["chart_dpi"], facecolor=MS["bg"])
     gs  = fig.add_gridspec(
         2, 1, hspace=0.0,
@@ -253,70 +260,74 @@ def draw_chart(symbol, name, df, nifty_df=None):
     # ── Week separators ────────────────────────────────────────────────────
     for ax in (ax1, ax2):
         for wb in week_bdry:
-            ax.axvline(wb, color=MS["grid_week"], linewidth=0.55,
-                       linestyle='-', alpha=0.55, zorder=0)
+            ax.axvline(wb, color=MS["grid_week"], linewidth=0.6,
+                       linestyle='-', alpha=0.8, zorder=0)
 
     # ── Horizontal grid ────────────────────────────────────────────────────
-    ax1.yaxis.grid(True, color=MS["grid"], linewidth=0.5, zorder=0)
-    ax2.yaxis.grid(True, color=MS["grid"], linewidth=0.4, zorder=0)
+    ax1.yaxis.grid(True, color=MS["grid"], linewidth=0.6, zorder=0)
+    ax2.yaxis.grid(True, color=MS["grid"], linewidth=0.5, zorder=0)
     ax1.set_axisbelow(True);  ax2.set_axisbelow(True)
 
-    # ── Candlesticks: hollow up, filled down ───────────────────────────────
+    # ── Candlesticks — solid up & down (TradingView default) ───────────────
     xs = np.arange(n)
     for i in range(n):
         is_up = closes[i] >= opens[i]
         col = MS["up"] if is_up else MS["down"]
-        bh  = max(abs(closes[i] - opens[i]), price_range * 0.003)
+        bh  = max(abs(closes[i] - opens[i]), price_range * 0.002)
         by  = min(opens[i], closes[i])
-        # Both up and down: solid filled (TradingView style)
-        ax1.plot([i, i], [lows[i], highs[i]], color=col, linewidth=wick_lw, zorder=2, solid_capstyle='butt')
+        ax1.plot([i, i], [lows[i], highs[i]], color=col,
+                 linewidth=wick_lw, zorder=2, solid_capstyle='butt')
         ax1.add_patch(mpatches.Rectangle(
             (i - w/2, by), w, bh,
-            facecolor=col, edgecolor=col, linewidth=0.2, zorder=3, alpha=0.92))
+            facecolor=col, edgecolor=col, linewidth=0, zorder=3))
 
     # ── Moving Averages ─────────────────────────────────────────────────────
     for ma_arr, col, lbl, lw in [
-        (ma10, MS["ma10"], 'MA 10', 1.6),
-        (ma21, MS["ma21"], 'MA 21', 1.5),
-        (ma50, MS["ma50"], 'MA 50', 1.9),
+        (ma10, MS["ma10"], 'MA 10', 1.7),
+        (ma21, MS["ma21"], 'MA 21', 1.6),
+        (ma50, MS["ma50"], 'MA 50', 2.0),
     ]:
         valid = ~np.isnan(ma_arr)
         if valid.sum() >= 2:
             ax1.plot(xs[valid], ma_arr[valid], color=col, linewidth=lw,
-                     label=lbl, zorder=4, alpha=0.92)
+                     label=lbl, zorder=4, alpha=0.95, solid_capstyle='round')
 
     # ── 52W High / Low reference lines ─────────────────────────────────────
     h52 = highs.max();  l52 = lows.min()
-    ax1.axhline(h52, color=MS["52wh"], linewidth=0.7, linestyle=':', alpha=0.50, zorder=1)
-    ax1.axhline(l52, color=MS["52wl"], linewidth=0.7, linestyle=':', alpha=0.50, zorder=1)
-    ax1.text(n + 0.4, h52, '52W H', color=MS["52wh"], fontsize=7.5, va='center', fontweight='bold', fontfamily='monospace')
-    ax1.text(n + 0.4, l52, '52W L', color=MS["52wl"], fontsize=7.5, va='center', fontweight='bold', fontfamily='monospace')
+    ax1.axhline(h52, color=MS["52wh"], linewidth=0.8, linestyle='--', alpha=0.45, zorder=1)
+    ax1.axhline(l52, color=MS["52wl"], linewidth=0.8, linestyle='--', alpha=0.45, zorder=1)
+    ax1.text(n + 0.5, h52, '52W H', color=MS["52wh"], fontsize=7.5, va='center',
+             fontweight='bold', fontfamily=FONT_MONO)
+    ax1.text(n + 0.5, l52, '52W L', color=MS["52wl"], fontsize=7.5, va='center',
+             fontweight='bold', fontfamily=FONT_MONO)
 
     # ── RS Line vs NIFTY (secondary y-axis overlay) ─────────────────────────
     if rs_vals is not None:
         ax_rs = ax1.twinx()
         ax_rs.set_facecolor('none')
-        ax_rs.plot(xs, rs_vals, color=MS["rs_line"], linewidth=1.5, alpha=0.82, zorder=5)
+        ax_rs.plot(xs, rs_vals, color=MS["rs_line"], linewidth=1.4, alpha=0.85, zorder=5,
+                   solid_capstyle='round')
         ax_rs.fill_between(xs, rs_vals, 100,
-                           where=(rs_vals >= 100), color=MS["rs_line"], alpha=0.07, zorder=1)
+                           where=(rs_vals >= 100), color=MS["rs_line"], alpha=0.08, zorder=1)
         ax_rs.fill_between(xs, rs_vals, 100,
-                           where=(rs_vals < 100),  color=MS["down"],    alpha=0.07, zorder=1)
+                           where=(rs_vals < 100),  color=MS["down"],    alpha=0.08, zorder=1)
         rs_range = rs_vals.max() - rs_vals.min()
         ax_rs.set_ylim(rs_vals.min() - rs_range * 0.5,
                        rs_vals.max() + rs_range * 1.2)
         ax_rs.axis('off')
         ax_rs.set_xlim(-1, n + 5.5)
-        ax1.text(0.995, 0.015, f'RS {rs_vals[-1]:.0f}',
+        ax1.text(0.995, 0.012, f'RS {rs_vals[-1]:.0f}',
                  transform=ax1.transAxes, color=MS["rs_line"],
-                 fontsize=8, ha='right', va='bottom', fontfamily='monospace', fontweight='bold')
+                 fontsize=8, ha='right', va='bottom', fontfamily=FONT_MONO, fontweight='bold')
 
-    # ── Last price tag ─────────────────────────────────────────────────────
-    lp = closes[-1]
-    ax1.axhline(lp, color=MS["price_tag_bg"], linewidth=0.6, linestyle=':', alpha=0.45, zorder=1)
-    ax1.text(n + 0.4, lp, f'{RUPEE}{lp:,.0f}' if lp >= 100 else f'{RUPEE}{lp:,.2f}',
+    # ── Last price tag (colour = last candle direction) ─────────────────────
+    lp     = closes[-1]
+    lp_col = MS["up"] if closes[-1] >= opens[-1] else MS["down"]
+    ax1.axhline(lp, color=lp_col, linewidth=0.5, linestyle=':', alpha=0.4, zorder=1)
+    ax1.text(n + 0.5, lp, f'{RUPEE}{lp:,.0f}' if lp >= 100 else f'{RUPEE}{lp:,.2f}',
              color=MS["price_tag_fg"], fontsize=8.5, va='center', fontweight='bold',
-             fontfamily='monospace',
-             bbox=dict(facecolor=MS["price_tag_bg"], edgecolor='none', boxstyle='round,pad=0.30'))
+             fontfamily=FONT_MONO,
+             bbox=dict(facecolor=lp_col, edgecolor='none', boxstyle='round,pad=0.28'))
 
     # ── OHLC & change annotation ────────────────────────────────────────────
     chg     = closes[-1] - closes[0]
@@ -324,41 +335,47 @@ def draw_chart(symbol, name, df, nifty_df=None):
     arrow   = UP_ARROW if chg >= 0 else DOWN_ARROW
     chg_col = MS["up"] if chg >= 0 else MS["down"]
     fmt     = lambda v: f'{RUPEE}{v:,.0f}' if v >= 100 else f'{RUPEE}{v:,.2f}'
-    info    = (f"O {fmt(opens[-1])}  "
-               f"H {fmt(highs.max())}  "
-               f"L {fmt(lows.min())}  "
+    info    = (f"O {fmt(opens[-1])}   "
+               f"H {fmt(highs.max())}   "
+               f"L {fmt(lows.min())}   "
                f"C {fmt(closes[-1])}")
     ax1.text(0.005, 0.984, info, transform=ax1.transAxes,
-             color=MS["text_sec"], fontsize=8.5, va='top', fontfamily='monospace')
-    ax1.text(0.62, 0.984, f"{arrow} {fmt(abs(chg))}  ({abs(chg_pct):.2f}%)",
+             color=MS["text_sec"], fontsize=8.5, va='top', fontfamily=FONT_MONO)
+    ax1.text(0.60, 0.984, f"{arrow} {fmt(abs(chg))}  ({abs(chg_pct):.2f}%)",
              transform=ax1.transAxes, color=chg_col,
-             fontsize=8.5, va='top', fontweight='bold', fontfamily='monospace')
+             fontsize=9, va='top', fontweight='bold', fontfamily=FONT_MONO)
 
-    # ── Price axis ─────────────────────────────────────────────────────────
+    # ── Price axis (right side only) ────────────────────────────────────────
     ax1.tick_params(axis='y', colors=MS["text_sec"], labelsize=8.5,
-                    right=True, labelright=True, labelleft=False, length=3, width=0.5, pad=3)
+                    right=True, labelright=True, labelleft=False,
+                    length=4, width=0.5, pad=4, direction='out')
     ax1.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda x, _: f'{RUPEE}{x:,.0f}' if x >= 100 else f'{RUPEE}{x:,.2f}'))
     ax1.tick_params(axis='x', bottom=False, labelbottom=False, length=0)
     ax1.set_ylim(y_min, y_max)
     ax1.set_xlim(-1, n + 5.5)
-    for sp in ax1.spines.values():
-        sp.set_color(MS["border"]);  sp.set_linewidth(0.6)
+
+    # Spines — only keep right border (where price labels sit)
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['left'].set_visible(False)
+    ax1.spines['bottom'].set_color(MS["border"]); ax1.spines['bottom'].set_linewidth(0.5)
+    ax1.spines['right'].set_color(MS["border"]);  ax1.spines['right'].set_linewidth(0.5)
+
     ax1.legend(facecolor=MS["bg"], edgecolor=MS["border"],
                labelcolor=MS["text_sec"], fontsize=8.5,
                loc='upper left', bbox_to_anchor=(0.005, 0.962),
-               framealpha=0.85, borderpad=0.5, handlelength=1.6, ncol=3)
+               framealpha=0.90, borderpad=0.5, handlelength=1.8, ncol=3,
+               prop={'family': FONT_MONO, 'size': 8.5})
 
     # ── Volume panel ───────────────────────────────────────────────────────
     vol_max   = vols.max()
-    # Cap axis at 3× the 95th-percentile so one spike doesn't crush all bars
     vol_p95   = np.percentile(vols, 95)
     vol_ylim  = max(vol_p95 * 3.5, vol_max * 0.25)
 
     for i in range(n):
         vc = MS["up"] if closes[i] >= opens[i] else MS["down"]
-        ax2.bar(i, min(vols[i], vol_ylim * 0.98),   # clip spike tops
-                color=vc, width=w * 1.05, alpha=0.75, zorder=2)
+        ax2.bar(i, min(vols[i], vol_ylim * 0.98),
+                color=vc, width=w * 1.05, alpha=0.65, zorder=2)
 
     valid_vma = ~np.isnan(vol_ma20)
     if valid_vma.any():
@@ -366,34 +383,40 @@ def draw_chart(symbol, name, df, nifty_df=None):
                  linewidth=1.5, zorder=3, alpha=0.95)
 
     ax2.set_ylim(0, vol_ylim)
-    ax2.yaxis.grid(True, color=MS["grid"], linewidth=0.4, zorder=0)
+    ax2.yaxis.grid(True, color=MS["grid"], linewidth=0.5, zorder=0)
     ax2.set_axisbelow(True)
     ax2.tick_params(axis='y', colors=MS["text_sec"], labelsize=7.5,
-                    right=True, labelright=True, labelleft=False, length=2, width=0.5)
+                    right=True, labelright=True, labelleft=False,
+                    length=3, width=0.5, direction='out')
     ax2.yaxis.set_major_formatter(plt.FuncFormatter(
         lambda x, _: f'{x/1e7:.1f}Cr' if vol_max > 5e6 else f'{x/1e5:.0f}L'))
-    for sp in ax2.spines.values():
-        sp.set_color(MS["border"]);  sp.set_linewidth(0.5)
+
+    # Spines — match price panel
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['left'].set_visible(False)
+    ax2.spines['bottom'].set_color(MS["border"]); ax2.spines['bottom'].set_linewidth(0.5)
+    ax2.spines['right'].set_color(MS["border"]);  ax2.spines['right'].set_linewidth(0.5)
+
     ax2.text(0.005, 0.88, 'VOLUME', transform=ax2.transAxes,
-             color=MS["text_faint"], fontsize=7, va='top', fontfamily='monospace')
+             color=MS["text_faint"], fontsize=7, va='top', fontfamily=FONT)
 
     # ── X-axis month labels ────────────────────────────────────────────────
     ax2.set_xticks(month_ticks)
     ax2.set_xticklabels(
         [dates[i].strftime("%b '%y") for i in month_ticks],
-        color=MS["text_sec"], fontsize=8.5, fontfamily='monospace')
-    ax2.tick_params(axis='x', length=3, width=0.5, color=MS["border"])
+        color=MS["text_sec"], fontsize=8.5, fontfamily=FONT)
+    ax2.tick_params(axis='x', length=4, width=0.5, color=MS["border"], direction='out')
     ax2.set_xlim(-1, n + 5.5)
 
     # ── Figure header ──────────────────────────────────────────────────────
     period = f"{dates[0].strftime('%d %b %Y')} {ENDASH} {dates[-1].strftime('%d %b %Y')}"
     fig.text(0.015, 0.963, symbol,
-             color=MS["text"], fontsize=16, fontweight='bold', fontfamily='monospace')
+             color=MS["text"], fontsize=16, fontweight='bold', fontfamily=FONT_MONO)
     sym_w = len(symbol) * 0.0093
     fig.text(0.015 + sym_w, 0.963, f'  {DOT}  {name}',
-             color=MS["text_sec"], fontsize=10.5, fontfamily='sans-serif', va='center')
+             color=MS["text_sec"], fontsize=10.5, fontfamily=FONT, va='center')
     fig.text(0.915, 0.963, period,
-             color=MS["text_sec"], fontsize=8.5, ha='right', fontfamily='monospace', va='center')
+             color=MS["text_sec"], fontsize=8.5, ha='right', fontfamily=FONT, va='center')
 
     buf = BytesIO()
     plt.savefig(buf, format='png', dpi=CONFIG["chart_dpi"],
