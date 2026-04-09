@@ -24,6 +24,13 @@ from reportlab.lib.units import cm
 
 logging.basicConfig(level=logging.WARNING)
 
+RUPEE = '\u20b9'
+DOT   = '\u00b7'
+ENDASH = '\u2013'
+EMDASH = '\u2014'
+UP_ARROW   = '\u25b2'
+DOWN_ARROW = '\u25bc'
+
 CONFIG = {
     "batch_size"      : 50,
     "batch_delay_sec" : 5,
@@ -218,11 +225,11 @@ def draw_chart(symbol, name, df):
     chg_pct = (chg / closes[0]) * 100
     arrow   = '\u25b2' if chg >= 0 else '\u25bc'
     chg_col = CLAUDE["up"] if chg >= 0 else CLAUDE["down"]
-    info = (f"Open \u20b9{opens[-1]:,.2f}   \u00b7   High \u20b9{highs.max():,.2f}   \u00b7   "
-            f"Low \u20b9{lows.min():,.2f}   \u00b7   Close \u20b9{closes[-1]:,.2f}")
+    info = (f"Open {RUPEE}{opens[-1]:,.2f}   {DOT}   High {RUPEE}{highs.max():,.2f}   {DOT}   "
+            f"Low {RUPEE}{lows.min():,.2f}   {DOT}   Close {RUPEE}{closes[-1]:,.2f}")
     ax1.text(0.01, 0.975, info, transform=ax1.transAxes,
              color=CLAUDE["text_sec"], fontsize=8.5, va='top', fontfamily='serif')
-    ax1.text(0.58, 0.975, f"{arrow} \u20b9{abs(chg):.2f}  ({abs(chg_pct):.2f}%)",
+    ax1.text(0.58, 0.975, f"{arrow} {RUPEE}{abs(chg):.2f}  ({abs(chg_pct):.2f}%)",
              transform=ax1.transAxes,
              color=chg_col, fontsize=8.5, va='top', fontweight='bold')
 
@@ -241,9 +248,9 @@ def draw_chart(symbol, name, df):
                loc='upper left', bbox_to_anchor=(0.01, 0.91),
                framealpha=1, borderpad=0.6)
 
-    period = f"{dates[0].strftime('%d %b %Y')} \u2013 {dates[-1].strftime('%d %b %Y')}"
+    period = f"{dates[0].strftime('%d %b %Y')} {ENDASH} {dates[-1].strftime('%d %b %Y')}"
     fig.text(0.05, 0.955, symbol, color=CLAUDE["text"], fontsize=15, fontweight='bold', fontfamily='serif')
-    fig.text(0.05 + len(symbol) * 0.013, 0.956, f'  \u00b7  {name}',
+    fig.text(0.05 + len(symbol) * 0.013, 0.956, f'  {DOT}  {name}',
              color=CLAUDE["text_sec"], fontsize=10, fontfamily='serif', va='bottom')
     fig.text(0.93, 0.955, period, color=CLAUDE["text_sec"], fontsize=9, ha='right', fontfamily='serif')
 
@@ -300,31 +307,31 @@ def build_pdf(chart_data, output_path, label="NSE Stock Charts"):
     story.append(Spacer(1, 4.5*cm))
     story.append(Paragraph(label, cov_t))
     story.append(HRFlowable(width="100%", thickness=1.2, color=ORANGE, spaceAfter=10))
-    story.append(Paragraph("End-of-Day Candlestick Report \u2014 NSE Equity Stocks", cov_s))
+    story.append(Paragraph(f"End-of-Day Candlestick Report {EMDASH} NSE Equity Stocks", cov_s))
     story.append(Paragraph(
-        f"Generated {datetime.today().strftime('%A, %d %B %Y  \u00b7  %H:%M IST')}", cov_s))
+        f"Generated {datetime.today().strftime('%A, %d %B %Y')}  {DOT}  {datetime.today().strftime('%H:%M IST')}", cov_s))
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(
-        f"Stocks: {len(chart_data)}  \u00b7  Indicators: Candlestick \u00b7 MA20 \u00b7 MA50 \u00b7 Volume  \u00b7  Source: Yahoo Finance (EOD)",
+        f"Stocks: {len(chart_data)}  {DOT}  Indicators: Candlestick {DOT} MA20 {DOT} MA50 {DOT} Volume  {DOT}  Source: Yahoo Finance (EOD)",
         cov_n))
     story.append(PageBreak())
 
     total = len(chart_data)
     for idx, item in enumerate(chart_data, 1):
-        arrow = '\u25b2' if item['chg_pct'] >= 0 else '\u25bc'
+        arrow = UP_ARROW if item['chg_pct'] >= 0 else DOWN_ARROW
         story.append(Paragraph(
-            f"<b>{item['symbol']}</b>  \u00b7  {item['name']}  \u00b7  "
-            f"Close \u20b9{item['last_close']:,.2f}  \u00b7  "
-            f"{arrow} {abs(item['chg_pct']):.2f}% (period)  \u00b7  "
-            f"52W H \u20b9{item['high_52w']:,.2f}  /  L \u20b9{item['low_52w']:,.2f}  \u00b7  "
+            f"<b>{item['symbol']}</b>  {DOT}  {item['name']}  {DOT}  "
+            f"Close {RUPEE}{item['last_close']:,.2f}  {DOT}  "
+            f"{arrow} {abs(item['chg_pct']):.2f}% (period)  {DOT}  "
+            f"52W H {RUPEE}{item['high_52w']:,.2f}  /  L {RUPEE}{item['low_52w']:,.2f}  {DOT}  "
             f"#{idx} of {total}", hdr_s))
         story.append(Spacer(1, 0.12*cm))
         story.append(Image(item['img_buf'], width=26.5*cm, height=15*cm))
         story.append(Spacer(1, 0.1*cm))
         story.append(HRFlowable(width="100%", thickness=0.4, color=BORD, spaceAfter=3))
         story.append(Paragraph(
-            f"Daily OHLCV Candlestick  \u00b7  MA20 (terracotta)  \u00b7  "
-            f"MA50 (gray dashed)  \u00b7  Data: Yahoo Finance EOD  \u00b7  "
+            f"Daily OHLCV Candlestick  {DOT}  MA20 (terracotta)  {DOT}  "
+            f"MA50 (gray dashed)  {DOT}  Data: Yahoo Finance EOD  {DOT}  "
             f"{datetime.today().strftime('%d %b %Y')}", ftr_s))
         story.append(PageBreak())
 

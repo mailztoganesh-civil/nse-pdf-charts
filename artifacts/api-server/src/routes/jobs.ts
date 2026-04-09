@@ -14,9 +14,10 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-const OUTPUT_DIR = resolve(process.cwd(), "output");
-const SCRIPTS_DIR = resolve(process.cwd(), "python_scripts");
-const UPLOADS_DIR = resolve(process.cwd(), "tmp_uploads");
+const WORKSPACE_ROOT = resolve(process.cwd(), "..", "..");
+const OUTPUT_DIR = resolve(WORKSPACE_ROOT, "output");
+const SCRIPTS_DIR = resolve(WORKSPACE_ROOT, "python_scripts");
+const UPLOADS_DIR = resolve(WORKSPACE_ROOT, "tmp_uploads");
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(UPLOADS_DIR, { recursive: true });
