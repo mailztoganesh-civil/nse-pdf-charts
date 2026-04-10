@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { createReadStream, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import multer from "multer";
@@ -29,53 +29,126 @@ mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(UPLOADS_DIR, { recursive: true });
 mkdirSync(MPL_CACHE_DIR, { recursive: true });
 
-// Pre-warm matplotlib font cache at server startup so the first job doesn't hang.
-// Runs in the background — jobs wait until this is done before spawning Python.
-let mplWarmDone = false;
-let mplWarmPromise: Promise<void> | null = null;
+// ── Persistent Python worker ──────────────────────────────────────────────────
+// Python is spawned ONCE at server startup with --worker mode. It imports all
+// heavy libraries (numpy, pandas, matplotlib, yfinance) once and then waits for
+// job specs on stdin. This eliminates the 5-10 minute import overhead per job.
 
-function warmMatplotlib(): Promise<void> {
-  if (mplWarmPromise) return mplWarmPromise;
-  mplWarmPromise = new Promise<void>((resolve) => {
-    const pythonBin = findPythonBin();
-    logger.info({ pythonBin, mplCacheDir: MPL_CACHE_DIR }, "Pre-warming matplotlib font cache");
-    const warmEnv = {
-      ...process.env,
-      MPLBACKEND: "Agg",
-      MPLCONFIGDIR: MPL_CACHE_DIR,
-      PYTHONUNBUFFERED: "1",
-      // Prevent OpenBLAS/numpy thread pool from hanging in containerized environments
-      OMP_NUM_THREADS: "1",
-      OPENBLAS_NUM_THREADS: "1",
-      NUMEXPR_NUM_THREADS: "1",
-      MKL_NUM_THREADS: "1",
-    };
-    const proc = spawn(
-      pythonBin,
-      ["-c", "import numpy; import pandas; import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot; print('mpl_warm_ok')"],
-      {
-        env: warmEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    );
-    proc.stdout.on("data", (d: Buffer) => logger.info({ out: d.toString().trim() }, "mpl warmup stdout"));
-    proc.stderr.on("data", (d: Buffer) => logger.warn({ err: d.toString().trim() }, "mpl warmup stderr"));
-    proc.on("close", (code) => {
-      logger.info({ code }, "matplotlib warmup finished");
-      mplWarmDone = true;
-      resolve();
-    });
-    proc.on("error", (err) => {
-      logger.error({ err }, "matplotlib warmup spawn error");
-      mplWarmDone = true; // Don't block jobs if warmup fails
-      resolve();
-    });
-  });
-  return mplWarmPromise;
+const PYTHON_ENV = {
+  ...process.env,
+  PYTHONUNBUFFERED: "1",
+  MPLBACKEND: "Agg",
+  MPLCONFIGDIR: MPL_CACHE_DIR,
+  OMP_NUM_THREADS: "1",
+  OPENBLAS_NUM_THREADS: "1",
+  NUMEXPR_NUM_THREADS: "1",
+  MKL_NUM_THREADS: "1",
+};
+
+let workerProc: ChildProcess | null = null;
+let workerReadyResolve: (() => void) | null = null;
+let workerReadyPromise: Promise<void> = Promise.resolve();
+let activeJob: Job | null = null;
+let jobTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+let stdoutBuffer = "";
+
+function handleWorkerLine(line: string): void {
+  try {
+    const msg = JSON.parse(line);
+    logger.info({ pyMsg: msg, jobId: activeJob?.jobId }, "Python msg");
+
+    if (msg.type === "ready") {
+      logger.info("Python worker ready");
+      workerReadyResolve?.();
+      workerReadyResolve = null;
+      return;
+    }
+
+    const job = activeJob;
+    if (!job) return;
+
+    if (msg.type === "progress") {
+      job.progress = msg.done ?? job.progress;
+      job.total    = msg.total ?? job.total;
+      job.message  = msg.message ?? job.message;
+    } else if (msg.type === "building_pdf") {
+      job.message = msg.message ?? "Building PDF...";
+    } else if (msg.type === "complete") {
+      if (jobTimeoutHandle) { clearTimeout(jobTimeoutHandle); jobTimeoutHandle = null; }
+      job.status      = "completed";
+      job.progress    = msg.charted ?? job.total;
+      job.stockCount  = msg.charted ?? null;
+      job.completedAt = new Date().toISOString();
+      job.outputFile  = msg.output;
+      job.message     = `PDF ready — ${msg.charted} charts`;
+      logger.info({ jobId: job.jobId, output: msg.output }, "Job completed");
+      activeJob = null;
+    } else if (msg.type === "error") {
+      if (jobTimeoutHandle) { clearTimeout(jobTimeoutHandle); jobTimeoutHandle = null; }
+      job.status      = "failed";
+      job.completedAt = new Date().toISOString();
+      job.message     = msg.message ?? "Unknown error";
+      logger.error({ jobId: job.jobId, message: msg.message }, "Job failed");
+      activeJob = null;
+    }
+  } catch {
+    logger.info({ rawStdout: line, jobId: activeJob?.jobId }, "Python raw stdout");
+  }
 }
 
-// Kick it off immediately at module load
-warmMatplotlib();
+function spawnWorker(): void {
+  const pythonBin = findPythonBin();
+  const script    = join(SCRIPTS_DIR, "nse_chart_generator.py");
+
+  workerReadyPromise = new Promise<void>((res) => { workerReadyResolve = res; });
+
+  logger.info({ pythonBin }, "Spawning persistent Python worker");
+  workerProc = spawn(pythonBin, ["-u", script, "--worker"], {
+    cwd: process.cwd(),
+    env: PYTHON_ENV,
+  });
+
+  stdoutBuffer = "";
+  workerProc.stdout!.on("data", (chunk: Buffer) => {
+    stdoutBuffer += chunk.toString();
+    const parts = stdoutBuffer.split("\n");
+    stdoutBuffer = parts.pop()!; // keep incomplete last line
+    for (const line of parts) {
+      if (line.trim()) handleWorkerLine(line.trim());
+    }
+  });
+
+  workerProc.stderr!.on("data", (chunk: Buffer) => {
+    logger.error({ stderr: chunk.toString().trim() }, "Python worker stderr");
+  });
+
+  workerProc.on("close", (code) => {
+    logger.warn({ code }, "Python worker exited — will respawn on next job");
+    workerProc = null;
+    // If a job was active, mark it failed
+    if (activeJob) {
+      if (jobTimeoutHandle) { clearTimeout(jobTimeoutHandle); jobTimeoutHandle = null; }
+      activeJob.status      = "failed";
+      activeJob.completedAt = new Date().toISOString();
+      activeJob.message     = `Worker exited unexpectedly (code ${code})`;
+      activeJob = null;
+    }
+  });
+
+  workerProc.on("error", (err) => {
+    logger.error({ err }, "Python worker spawn error");
+    workerReadyResolve?.();
+    workerReadyResolve = null;
+  });
+}
+
+function getWorker(): Promise<ChildProcess> {
+  if (!workerProc) spawnWorker();
+  return workerReadyPromise.then(() => workerProc!);
+}
+
+// Spawn worker immediately at startup
+spawnWorker();
 
 const CSV_MIMES = new Set([
   "text/csv",
@@ -130,109 +203,36 @@ function findPythonBin(): string {
   return "python3";
 }
 
-function spawnPythonJob(job: Job, args: string[]): void {
-  const pythonBin = findPythonBin();
-  const script = join(SCRIPTS_DIR, "nse_chart_generator.py");
-
-  // Wait for matplotlib warmup before spawning the real job
-  warmMatplotlib().then(() => {
-    logger.info({ jobId: job.jobId, pythonBin, args }, "Spawning Python chart generator");
-    _doSpawn(job, args, pythonBin, script);
-  });
-}
-
-function _doSpawn(job: Job, args: string[], pythonBin: string, script: string): void {
-  const proc = spawn(pythonBin, ["-u", script, ...args], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PYTHONUNBUFFERED: "1",
-      MPLBACKEND: "Agg",
-      MPLCONFIGDIR: MPL_CACHE_DIR,
-      // Prevent OpenBLAS/numpy thread pool from hanging in containerized environments
-      OMP_NUM_THREADS: "1",
-      OPENBLAS_NUM_THREADS: "1",
-      NUMEXPR_NUM_THREADS: "1",
-      MKL_NUM_THREADS: "1",
-    },
-  });
-
+/** Send a job spec to the persistent worker process. */
+function submitJobToWorker(job: Job, spec: Record<string, unknown>): void {
   job.status = "running";
 
-  // Hard timeout — kill the process if it hasn't finished in 20 minutes
+  // 20-minute hard timeout per job
   const JOB_TIMEOUT_MS = 20 * 60 * 1000;
-  const timeoutHandle = setTimeout(() => {
-    if (job.status === "running" || job.status === "pending") {
-      logger.error({ jobId: job.jobId }, "Python job timed out — killing process");
-      proc.kill("SIGKILL");
-      job.status = "failed";
+  jobTimeoutHandle = setTimeout(() => {
+    if (activeJob?.jobId === job.jobId) {
+      logger.error({ jobId: job.jobId }, "Job timed out after 20 minutes");
+      job.status      = "failed";
       job.completedAt = new Date().toISOString();
-      job.message = "Timed out after 8 minutes";
+      job.message     = "Timed out after 20 minutes";
+      activeJob = null;
+      // Kill and respawn the worker so it's clean for next job
+      workerProc?.kill("SIGKILL");
     }
+    jobTimeoutHandle = null;
   }, JOB_TIMEOUT_MS);
 
-  proc.stdout.on("data", (chunk: Buffer) => {
-    const lines = chunk.toString().split("\n").filter(Boolean);
-    for (const line of lines) {
-      try {
-        const msg = JSON.parse(line);
-        // Log ALL message types for visibility
-        logger.info({ jobId: job.jobId, pyMsg: msg }, "Python stdout msg");
-        if (msg.type === "progress") {
-          job.progress = msg.done ?? job.progress;
-          job.total = msg.total ?? job.total;
-          job.message = msg.message ?? job.message;
-        } else if (msg.type === "building_pdf") {
-          job.message = msg.message ?? "Building PDF...";
-        } else if (msg.type === "complete") {
-          clearTimeout(timeoutHandle);
-          job.status = "completed";
-          job.progress = msg.charted ?? job.total;
-          job.stockCount = msg.charted ?? null;
-          job.completedAt = new Date().toISOString();
-          job.outputFile = msg.output;
-          job.message = `PDF ready — ${msg.charted} charts`;
-          logger.info({ jobId: job.jobId, output: msg.output }, "Job completed");
-        } else if (msg.type === "error") {
-          clearTimeout(timeoutHandle);
-          job.status = "failed";
-          job.completedAt = new Date().toISOString();
-          job.message = msg.message ?? "Unknown error";
-          logger.error({ jobId: job.jobId, message: msg.message }, "Job failed");
-        }
-      } catch {
-        // Non-JSON stdout — log it so we can see what Python is printing
-        logger.info({ jobId: job.jobId, rawStdout: line }, "Python raw stdout");
-      }
-    }
-  });
+  activeJob = job;
 
-  proc.stderr.on("data", (chunk: Buffer) => {
-    logger.error({ jobId: job.jobId, stderr: chunk.toString().trim() }, "Python stderr");
-  });
-
-  proc.on("close", (code) => {
-    clearTimeout(timeoutHandle);
-    if (job.status === "running") {
-      if (code === 0) {
-        job.status = "completed";
-        job.completedAt = new Date().toISOString();
-        job.message = "Completed";
-      } else {
-        job.status = "failed";
-        job.completedAt = new Date().toISOString();
-        job.message = `Process exited with code ${code}`;
-      }
-    }
-    logger.info({ jobId: job.jobId, code, status: job.status }, "Python process closed");
-  });
-
-  proc.on("error", (err) => {
-    clearTimeout(timeoutHandle);
-    job.status = "failed";
+  getWorker().then((worker) => {
+    logger.info({ jobId: job.jobId, spec }, "Sending job to persistent Python worker");
+    worker.stdin!.write(JSON.stringify(spec) + "\n");
+  }).catch((err) => {
+    if (jobTimeoutHandle) { clearTimeout(jobTimeoutHandle); jobTimeoutHandle = null; }
+    job.status      = "failed";
     job.completedAt = new Date().toISOString();
-    job.message = `Failed to start: ${err.message}`;
-    logger.error({ jobId: job.jobId, err }, "Python spawn error");
+    job.message     = `Worker unavailable: ${err.message}`;
+    activeJob = null;
   });
 }
 
@@ -270,15 +270,15 @@ router.post("/jobs/generate-all", async (req, res): Promise<void> => {
   jobs.set(jobId, job);
   req.log.info({ jobId, historyMonths, letterFilter }, "Starting all-NSE generation job");
 
-  const args = [
-    "--mode", "all",
-    "--output", outFile,
-    "--history-months", String(historyMonths),
-    "--label", label,
-  ];
-  if (letterFilter !== "ALL") args.push("--letters", letterFilter);
+  const spec: Record<string, unknown> = {
+    mode: "all",
+    output: outFile,
+    historyMonths,
+    label,
+    letters: letterFilter !== "ALL" ? letterFilter : "",
+  };
 
-  spawnPythonJob(job, args);
+  submitJobToWorker(job, spec);
 
   res.status(202).json(GetJobResponse.parse({ ...job, outputFile: undefined }));
 });
@@ -435,21 +435,22 @@ router.post("/jobs/generate-csv", async (req, res): Promise<void> => {
   req.log.info({ jobId, stockCount: stocks.length, startDate, endDate }, "Starting CSV-filtered generation job");
 
   // Write stocksByDate to a temp JSON file so Python can mark screener-date arrows
-  const pyArgs: string[] = [
-    "--mode", "filtered",
-    "--output", outFile,
-    "--symbols", stocks.join(","),
-    "--history-months", String(historyMonths),
-    "--label", `NSE Screener Charts — ${startDate} to ${endDate}`,
-  ];
-
+  let screenerDatesFile = "";
   if (stocksByDate && Object.keys(stocksByDate).length > 0) {
-    const screenerFile = join(UPLOADS_DIR, `screener_${jobId}.json`);
-    writeFileSync(screenerFile, JSON.stringify(stocksByDate), "utf-8");
-    pyArgs.push("--screener-dates-file", screenerFile);
+    screenerDatesFile = join(UPLOADS_DIR, `screener_${jobId}.json`);
+    writeFileSync(screenerDatesFile, JSON.stringify(stocksByDate), "utf-8");
   }
 
-  spawnPythonJob(job, pyArgs);
+  const spec: Record<string, unknown> = {
+    mode: "filtered",
+    output: outFile,
+    symbols: stocks.join(","),
+    historyMonths,
+    label: `NSE Screener Charts — ${startDate} to ${endDate}`,
+    screenerDatesFile,
+  };
+
+  submitJobToWorker(job, spec);
 
   res.status(202).json(GetJobResponse.parse({ ...job, outputFile: undefined }));
 });

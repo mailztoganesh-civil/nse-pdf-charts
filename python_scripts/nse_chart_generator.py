@@ -705,63 +705,113 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
         emit({"type": "error", "message": "No charts generated — check symbol list or network."})
 
 
-def main():
-    parser = argparse.ArgumentParser(description='NSE Chart PDF Generator')
-    parser.add_argument('--mode', choices=['all', 'filtered'], required=True)
-    parser.add_argument('--output', required=True, help='Output PDF path')
-    parser.add_argument('--symbols', default='', help='Comma-separated NSE symbols (for filtered mode)')
-    parser.add_argument('--history-months', type=int, default=6)
-    parser.add_argument('--label', default='NSE Stock Charts')
-    parser.add_argument('--letters', default='', help='Letter range filter e.g. A-D or A,B,C')
-    parser.add_argument('--screener-dates-file', default='',
-                        help='Path to JSON file mapping date→[symbols] for screener-date arrows')
-    args = parser.parse_args()
-
-    # Build symbol→dates mapping from screener JSON (date → [symbols])
-    sym_screener_dates = {}
-    if args.screener_dates_file and os.path.exists(args.screener_dates_file):
+def _load_screener_dates_file(path):
+    """Load and invert a screener dates JSON file (date→[symbols] → symbol→[dates])."""
+    sym_dates = {}
+    if path and os.path.exists(path):
         try:
-            import json as _json
-            date_to_syms = _json.loads(open(args.screener_dates_file).read())
-            # Invert: symbol → [dates]
+            date_to_syms = json.loads(open(path).read())
             for date_str, syms in date_to_syms.items():
                 for sym in syms:
-                    sym_screener_dates.setdefault(sym, []).append(date_str)
-            # Clean up temp file
+                    sym_dates.setdefault(sym, []).append(date_str)
             try:
-                os.remove(args.screener_dates_file)
+                os.remove(path)
             except Exception:
                 pass
         except Exception as e:
             logging.warning(f"Could not load screener dates file: {e}")
+    return sym_dates
 
-    if args.mode == 'all':
+
+def _run_job(spec):
+    """Execute one job from a spec dict. Used by both CLI and worker modes."""
+    mode           = spec.get("mode", "filtered")
+    output_path    = spec["output"]
+    history_months = spec.get("historyMonths", 6)
+    label          = spec.get("label", "NSE Stock Charts")
+    screener_file  = spec.get("screenerDatesFile", "")
+    sym_screener_dates = _load_screener_dates_file(screener_file)
+
+    if mode == "all":
         emit({"type": "progress", "done": 0, "total": 1, "message": "Fetching NSE symbol list..."})
         symbol_list = get_nse_symbols()
         symbol_list.sort(key=lambda x: x[1])
-
-        # Apply letter filter if specified
-        if args.letters:
-            letter_range = args.letters.strip().upper()
-            if '-' in letter_range and len(letter_range) == 3:
-                start_l, end_l = letter_range[0], letter_range[2]
+        letters = spec.get("letters", "").strip().upper()
+        if letters:
+            if '-' in letters and len(letters) == 3:
+                start_l, end_l = letters[0], letters[2]
                 allowed = set(chr(c) for c in range(ord(start_l), ord(end_l) + 1))
             else:
-                allowed = set(l.strip() for l in letter_range.split(',') if l.strip())
+                allowed = set(l.strip() for l in letters.split(',') if l.strip())
             symbol_list = [s for s in symbol_list if s[1] and s[1][0].upper() in allowed]
-
         emit({"type": "progress", "done": 0, "total": len(symbol_list),
               "message": f"Found {len(symbol_list)} NSE symbols"})
-        run_generate(symbol_list, args.output, args.history_months, args.label,
+        run_generate(symbol_list, output_path, history_months, label,
                      sym_screener_dates=sym_screener_dates or None)
     else:
-        if not args.symbols:
+        syms = [s.strip().upper() for s in spec.get("symbols", "").split(',') if s.strip()]
+        if not syms:
             emit({"type": "error", "message": "No symbols provided for filtered mode"})
-            sys.exit(1)
-        syms = [s.strip().upper() for s in args.symbols.split(',') if s.strip()]
+            return
         symbol_list = [(f"{s}.NS", s, s) for s in syms]
-        run_generate(symbol_list, args.output, args.history_months, args.label,
+        run_generate(symbol_list, output_path, history_months, label,
                      sym_screener_dates=sym_screener_dates or None)
+
+
+def worker_loop():
+    """
+    Persistent worker mode — imports happen once, then jobs are read from stdin.
+    Each job is a single JSON line. Progress/complete are written to stdout as usual.
+    """
+    emit({"type": "ready", "message": "Worker ready — all imports done"})
+    for raw_line in sys.stdin:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            spec = json.loads(raw_line)
+        except Exception as e:
+            emit({"type": "error", "message": f"Invalid job JSON: {e}"})
+            continue
+        try:
+            _run_job(spec)
+        except Exception as e:
+            emit({"type": "error", "message": f"Job failed: {e}"})
+        # After emitting complete/error, loop back and wait for the next job
+
+
+def main():
+    parser = argparse.ArgumentParser(description='NSE Chart PDF Generator')
+    parser.add_argument('--worker', action='store_true',
+                        help='Run as persistent worker (reads jobs from stdin)')
+    parser.add_argument('--mode', choices=['all', 'filtered'])
+    parser.add_argument('--output', default='', help='Output PDF path')
+    parser.add_argument('--symbols', default='')
+    parser.add_argument('--history-months', type=int, default=6)
+    parser.add_argument('--label', default='NSE Stock Charts')
+    parser.add_argument('--letters', default='')
+    parser.add_argument('--screener-dates-file', default='')
+    args = parser.parse_args()
+
+    if args.worker:
+        worker_loop()
+        return
+
+    # Legacy single-job CLI mode
+    if not args.mode:
+        print("--mode is required unless --worker is specified", file=sys.stderr)
+        sys.exit(1)
+
+    spec = {
+        "mode"              : args.mode,
+        "output"            : args.output,
+        "historyMonths"     : args.history_months,
+        "label"             : args.label,
+        "letters"           : args.letters,
+        "symbols"           : args.symbols,
+        "screenerDatesFile" : args.screener_dates_file,
+    }
+    _run_job(spec)
 
 
 if __name__ == '__main__':
