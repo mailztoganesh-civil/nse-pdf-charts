@@ -74,9 +74,14 @@ function spawnPythonJob(job: Job, args: string[]): void {
 
   logger.info({ jobId: job.jobId, args }, "Spawning Python chart generator");
 
-  const proc = spawn(pythonBin, [script, ...args], {
+  const proc = spawn(pythonBin, ["-u", script, ...args], {
     cwd: process.cwd(),
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: "1",
+      MPLBACKEND: "Agg",
+      MPLCONFIGDIR: "/tmp/.matplotlib",
+    },
   });
 
   job.status = "running";

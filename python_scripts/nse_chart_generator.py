@@ -5,12 +5,15 @@ Used by the web app backend (called via CLI with progress JSON on stdout).
 """
 
 import os, sys, json, time, random, logging, requests, zipfile, argparse
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-import threading, multiprocessing
+import threading
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
+# Pre-create config dir so matplotlib never hangs trying to write to a restricted path
+import os as _os
+_mpl_dir = _os.environ.get("MPLCONFIGDIR", "/tmp/.matplotlib")
+_os.makedirs(_mpl_dir, exist_ok=True)
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import yfinance as yf
