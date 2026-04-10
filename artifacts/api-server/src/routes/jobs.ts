@@ -70,10 +70,12 @@ function makeJobId(): string {
 
 /** Find the Python binary that has the required packages available. */
 function findPythonBin(): string {
-  // Local .pythonlibs Python (Replit dev environment — has all packages)
-  const local = join(WORKSPACE_ROOT, ".pythonlibs", "bin", "python3");
-  if (existsSync(local)) return local;
-  // System fallback (production — packages installed via prebuild pip step)
+  // In dev only: prefer the local .pythonlibs Python which has all packages
+  if (process.env.NODE_ENV !== "production") {
+    const local = join(WORKSPACE_ROOT, ".pythonlibs", "bin", "python3");
+    if (existsSync(local)) return local;
+  }
+  // In production: use system python3 (packages installed via prebuild pip step)
   return "python3";
 }
 
