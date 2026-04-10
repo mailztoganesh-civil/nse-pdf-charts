@@ -39,11 +39,22 @@ function warmMatplotlib(): Promise<void> {
   mplWarmPromise = new Promise<void>((resolve) => {
     const pythonBin = findPythonBin();
     logger.info({ pythonBin, mplCacheDir: MPL_CACHE_DIR }, "Pre-warming matplotlib font cache");
+    const warmEnv = {
+      ...process.env,
+      MPLBACKEND: "Agg",
+      MPLCONFIGDIR: MPL_CACHE_DIR,
+      PYTHONUNBUFFERED: "1",
+      // Prevent OpenBLAS/numpy thread pool from hanging in containerized environments
+      OMP_NUM_THREADS: "1",
+      OPENBLAS_NUM_THREADS: "1",
+      NUMEXPR_NUM_THREADS: "1",
+      MKL_NUM_THREADS: "1",
+    };
     const proc = spawn(
       pythonBin,
-      ["-c", "import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot; print('mpl_warm_ok')"],
+      ["-c", "import numpy; import pandas; import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot; print('mpl_warm_ok')"],
       {
-        env: { ...process.env, MPLBACKEND: "Agg", MPLCONFIGDIR: MPL_CACHE_DIR, PYTHONUNBUFFERED: "1" },
+        env: warmEnv,
         stdio: ["ignore", "pipe", "pipe"],
       }
     );
@@ -138,6 +149,11 @@ function _doSpawn(job: Job, args: string[], pythonBin: string, script: string): 
       PYTHONUNBUFFERED: "1",
       MPLBACKEND: "Agg",
       MPLCONFIGDIR: MPL_CACHE_DIR,
+      // Prevent OpenBLAS/numpy thread pool from hanging in containerized environments
+      OMP_NUM_THREADS: "1",
+      OPENBLAS_NUM_THREADS: "1",
+      NUMEXPR_NUM_THREADS: "1",
+      MKL_NUM_THREADS: "1",
     },
   });
 
