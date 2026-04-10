@@ -23,8 +23,48 @@ const OUTPUT_DIR = resolve(WORKSPACE_ROOT, "output");
 const SCRIPTS_DIR = resolve(WORKSPACE_ROOT, "python_scripts");
 const UPLOADS_DIR = resolve(WORKSPACE_ROOT, "tmp_uploads");
 
+const MPL_CACHE_DIR = resolve(WORKSPACE_ROOT, ".mpl_cache");
+
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(UPLOADS_DIR, { recursive: true });
+mkdirSync(MPL_CACHE_DIR, { recursive: true });
+
+// Pre-warm matplotlib font cache at server startup so the first job doesn't hang.
+// Runs in the background — jobs wait until this is done before spawning Python.
+let mplWarmDone = false;
+let mplWarmPromise: Promise<void> | null = null;
+
+function warmMatplotlib(): Promise<void> {
+  if (mplWarmPromise) return mplWarmPromise;
+  mplWarmPromise = new Promise<void>((resolve) => {
+    const pythonBin = findPythonBin();
+    logger.info({ pythonBin, mplCacheDir: MPL_CACHE_DIR }, "Pre-warming matplotlib font cache");
+    const proc = spawn(
+      pythonBin,
+      ["-c", "import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot; print('mpl_warm_ok')"],
+      {
+        env: { ...process.env, MPLBACKEND: "Agg", MPLCONFIGDIR: MPL_CACHE_DIR, PYTHONUNBUFFERED: "1" },
+        stdio: ["ignore", "pipe", "pipe"],
+      }
+    );
+    proc.stdout.on("data", (d: Buffer) => logger.info({ out: d.toString().trim() }, "mpl warmup stdout"));
+    proc.stderr.on("data", (d: Buffer) => logger.warn({ err: d.toString().trim() }, "mpl warmup stderr"));
+    proc.on("close", (code) => {
+      logger.info({ code }, "matplotlib warmup finished");
+      mplWarmDone = true;
+      resolve();
+    });
+    proc.on("error", (err) => {
+      logger.error({ err }, "matplotlib warmup spawn error");
+      mplWarmDone = true; // Don't block jobs if warmup fails
+      resolve();
+    });
+  });
+  return mplWarmPromise;
+}
+
+// Kick it off immediately at module load
+warmMatplotlib();
 
 const CSV_MIMES = new Set([
   "text/csv",
@@ -83,25 +123,45 @@ function spawnPythonJob(job: Job, args: string[]): void {
   const pythonBin = findPythonBin();
   const script = join(SCRIPTS_DIR, "nse_chart_generator.py");
 
-  logger.info({ jobId: job.jobId, pythonBin, args }, "Spawning Python chart generator");
+  // Wait for matplotlib warmup before spawning the real job
+  warmMatplotlib().then(() => {
+    logger.info({ jobId: job.jobId, pythonBin, args }, "Spawning Python chart generator");
+    _doSpawn(job, args, pythonBin, script);
+  });
+}
 
+function _doSpawn(job: Job, args: string[], pythonBin: string, script: string): void {
   const proc = spawn(pythonBin, ["-u", script, ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       PYTHONUNBUFFERED: "1",
       MPLBACKEND: "Agg",
-      MPLCONFIGDIR: "/tmp/.matplotlib",
+      MPLCONFIGDIR: MPL_CACHE_DIR,
     },
   });
 
   job.status = "running";
+
+  // Hard timeout — kill the process if it hasn't finished in 8 minutes
+  const JOB_TIMEOUT_MS = 8 * 60 * 1000;
+  const timeoutHandle = setTimeout(() => {
+    if (job.status === "running" || job.status === "pending") {
+      logger.error({ jobId: job.jobId }, "Python job timed out — killing process");
+      proc.kill("SIGKILL");
+      job.status = "failed";
+      job.completedAt = new Date().toISOString();
+      job.message = "Timed out after 8 minutes";
+    }
+  }, JOB_TIMEOUT_MS);
 
   proc.stdout.on("data", (chunk: Buffer) => {
     const lines = chunk.toString().split("\n").filter(Boolean);
     for (const line of lines) {
       try {
         const msg = JSON.parse(line);
+        // Log ALL message types for visibility
+        logger.info({ jobId: job.jobId, pyMsg: msg }, "Python stdout msg");
         if (msg.type === "progress") {
           job.progress = msg.done ?? job.progress;
           job.total = msg.total ?? job.total;
@@ -109,6 +169,7 @@ function spawnPythonJob(job: Job, args: string[]): void {
         } else if (msg.type === "building_pdf") {
           job.message = msg.message ?? "Building PDF...";
         } else if (msg.type === "complete") {
+          clearTimeout(timeoutHandle);
           job.status = "completed";
           job.progress = msg.charted ?? job.total;
           job.stockCount = msg.charted ?? null;
@@ -117,22 +178,25 @@ function spawnPythonJob(job: Job, args: string[]): void {
           job.message = `PDF ready — ${msg.charted} charts`;
           logger.info({ jobId: job.jobId, output: msg.output }, "Job completed");
         } else if (msg.type === "error") {
+          clearTimeout(timeoutHandle);
           job.status = "failed";
           job.completedAt = new Date().toISOString();
           job.message = msg.message ?? "Unknown error";
           logger.error({ jobId: job.jobId, message: msg.message }, "Job failed");
         }
       } catch {
-        // Not JSON — ignore
+        // Non-JSON stdout — log it so we can see what Python is printing
+        logger.info({ jobId: job.jobId, rawStdout: line }, "Python raw stdout");
       }
     }
   });
 
   proc.stderr.on("data", (chunk: Buffer) => {
-    logger.info({ jobId: job.jobId, stderr: chunk.toString().trim() }, "Python stderr");
+    logger.error({ jobId: job.jobId, stderr: chunk.toString().trim() }, "Python stderr");
   });
 
   proc.on("close", (code) => {
+    clearTimeout(timeoutHandle);
     if (job.status === "running") {
       if (code === 0) {
         job.status = "completed";
@@ -148,6 +212,7 @@ function spawnPythonJob(job: Job, args: string[]): void {
   });
 
   proc.on("error", (err) => {
+    clearTimeout(timeoutHandle);
     job.status = "failed";
     job.completedAt = new Date().toISOString();
     job.message = `Failed to start: ${err.message}`;
