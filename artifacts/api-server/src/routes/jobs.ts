@@ -159,8 +159,8 @@ function _doSpawn(job: Job, args: string[], pythonBin: string, script: string): 
 
   job.status = "running";
 
-  // Hard timeout — kill the process if it hasn't finished in 8 minutes
-  const JOB_TIMEOUT_MS = 8 * 60 * 1000;
+  // Hard timeout — kill the process if it hasn't finished in 20 minutes
+  const JOB_TIMEOUT_MS = 20 * 60 * 1000;
   const timeoutHandle = setTimeout(() => {
     if (job.status === "running" || job.status === "pending") {
       logger.error({ jobId: job.jobId }, "Python job timed out — killing process");
