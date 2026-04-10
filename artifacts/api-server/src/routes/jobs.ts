@@ -121,12 +121,12 @@ function makeJobId(): string {
 
 /** Find the Python binary that has the required packages available. */
 function findPythonBin(): string {
-  // In dev only: prefer the local .pythonlibs Python which has all packages
-  if (process.env.NODE_ENV !== "production") {
-    const local = join(WORKSPACE_ROOT, ".pythonlibs", "bin", "python3");
-    if (existsSync(local)) return local;
-  }
-  // In production: use system python3 (packages installed via prebuild pip step)
+  // Always prefer .pythonlibs/bin/python3 — it has all C-extension packages
+  // compiled with the correct library paths (numpy, pandas, matplotlib, etc.)
+  // This path exists in both dev and production (Replit deploys workspace files).
+  const local = join(WORKSPACE_ROOT, ".pythonlibs", "bin", "python3");
+  if (existsSync(local)) return local;
+  // Fallback only if .pythonlibs doesn't exist
   return "python3";
 }
 
