@@ -4,10 +4,21 @@ Generates candlestick charts for NSE stocks and assembles them into a PDF.
 Used by the web app backend (called via CLI with progress JSON on stdout).
 """
 
+# Startup heartbeat — emitted before any heavy imports so we know Python launched
+import sys as _sys, json as _json
+_sys.stdout.write(_json.dumps({"type":"startup","message":"Python interpreter started"}) + "\n")
+_sys.stdout.flush()
+
 import os, sys, json, time, random, logging, requests, zipfile, argparse
 import threading
+_sys.stdout.write(_json.dumps({"type":"startup","message":"stdlib imported"}) + "\n")
+_sys.stdout.flush()
+
 import numpy as np
 import pandas as pd
+_sys.stdout.write(_json.dumps({"type":"startup","message":"numpy/pandas imported"}) + "\n")
+_sys.stdout.flush()
+
 import matplotlib
 matplotlib.use('Agg')
 # Pre-create config dir so matplotlib never hangs trying to write to a restricted path
@@ -16,7 +27,12 @@ _mpl_dir = _os.environ.get("MPLCONFIGDIR", "/tmp/.matplotlib")
 _os.makedirs(_mpl_dir, exist_ok=True)
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+_sys.stdout.write(_json.dumps({"type":"startup","message":"matplotlib imported"}) + "\n")
+_sys.stdout.flush()
+
 import yfinance as yf
+_sys.stdout.write(_json.dumps({"type":"startup","message":"yfinance imported"}) + "\n")
+_sys.stdout.flush()
 
 from datetime import datetime, timedelta
 from io import BytesIO

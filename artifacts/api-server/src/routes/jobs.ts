@@ -68,11 +68,20 @@ function makeJobId(): string {
   return `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Find the Python binary that has the required packages available. */
+function findPythonBin(): string {
+  // Local .pythonlibs Python (Replit dev environment — has all packages)
+  const local = join(WORKSPACE_ROOT, ".pythonlibs", "bin", "python3");
+  if (existsSync(local)) return local;
+  // System fallback (production — packages installed via prebuild pip step)
+  return "python3";
+}
+
 function spawnPythonJob(job: Job, args: string[]): void {
-  const pythonBin = "python3";
+  const pythonBin = findPythonBin();
   const script = join(SCRIPTS_DIR, "nse_chart_generator.py");
 
-  logger.info({ jobId: job.jobId, args }, "Spawning Python chart generator");
+  logger.info({ jobId: job.jobId, pythonBin, args }, "Spawning Python chart generator");
 
   const proc = spawn(pythonBin, ["-u", script, ...args], {
     cwd: process.cwd(),
@@ -118,7 +127,7 @@ function spawnPythonJob(job: Job, args: string[]): void {
   });
 
   proc.stderr.on("data", (chunk: Buffer) => {
-    logger.debug({ jobId: job.jobId, stderr: chunk.toString() }, "Python stderr");
+    logger.info({ jobId: job.jobId, stderr: chunk.toString().trim() }, "Python stderr");
   });
 
   proc.on("close", (code) => {
