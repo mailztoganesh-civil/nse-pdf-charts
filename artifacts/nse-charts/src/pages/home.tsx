@@ -232,6 +232,7 @@ export default function Home() {
   const [isParsing, setIsParsing] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [useAllStocks, setUseAllStocks] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Compute stocks for the selected date range from stocksByDate map
@@ -277,6 +278,7 @@ export default function Home() {
     setCsvFile(file);
     setIsParsing(true);
     setParseResult(null);
+    setUseAllStocks(false);
 
     try {
       const formData = new FormData();
@@ -307,23 +309,29 @@ export default function Home() {
   };
 
   const handleGenerateCsv = () => {
-    if (!parseResult || !startDate || !endDate || filteredStocks.length === 0) return;
+    const stocksToUse = useAllStocks ? (parseResult?.stocks ?? []) : filteredStocks;
+    if (!parseResult || stocksToUse.length === 0) return;
+    if (!useAllStocks && (!startDate || !endDate)) return;
+
+    const effectiveStart = useAllStocks ? (parseResult.minDate || startDate) : startDate;
+    const effectiveEnd   = useAllStocks ? (parseResult.maxDate || endDate)   : endDate;
 
     generateCsvMutation.mutate(
       { 
         data: { 
-          stocks: filteredStocks,
-          startDate, 
-          endDate, 
+          stocks: stocksToUse,
+          startDate: effectiveStart,
+          endDate:   effectiveEnd,
           historyMonths: parseInt(historyMonths, 10) || 6,
-          // Only send stocksByDate entries within the selected date range
-          stocksByDate: parseResult
-            ? Object.fromEntries(
-                Object.entries(parseResult.stocksByDate).filter(
-                  ([date]) => date >= startDate && date <= endDate
+          stocksByDate: useAllStocks
+            ? parseResult.stocksByDate
+            : parseResult
+              ? Object.fromEntries(
+                  Object.entries(parseResult.stocksByDate).filter(
+                    ([date]) => date >= startDate && date <= endDate
+                  )
                 )
-              )
-            : undefined,
+              : undefined,
         } 
       },
       {
@@ -478,26 +486,52 @@ export default function Home() {
                     </Button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <ScreenerDatePicker
-                      label="Start Date"
-                      value={startDate}
-                      onChange={setStartDate}
-                      screenerDates={screenerDates}
-                      minDate={parseResult.minDate}
-                      maxDate={parseResult.maxDate}
-                      testId="input-start-date"
-                    />
-                    <ScreenerDatePicker
-                      label="End Date"
-                      value={endDate}
-                      onChange={setEndDate}
-                      screenerDates={screenerDates}
-                      minDate={parseResult.minDate}
-                      maxDate={parseResult.maxDate}
-                      testId="input-end-date"
-                    />
+                  {/* Toggle: all stocks vs date range */}
+                  <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3 bg-muted/20">
+                    <div>
+                      <div className="font-mono text-sm font-bold">All stocks in CSV</div>
+                      <div className="font-mono text-xs text-muted-foreground mt-0.5">
+                        {useAllStocks
+                          ? `Chart all ${parseResult.stocks.length} symbols regardless of date`
+                          : "Chart only stocks in selected date range"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={useAllStocks}
+                      onClick={() => setUseAllStocks(v => !v)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none
+                        ${useAllStocks ? "bg-primary" : "bg-input"}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform
+                        ${useAllStocks ? "translate-x-5" : "translate-x-0"}`} />
+                    </button>
                   </div>
+
+                  {/* Date range — only shown when not using all stocks */}
+                  {!useAllStocks && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <ScreenerDatePicker
+                        label="Start Date"
+                        value={startDate}
+                        onChange={setStartDate}
+                        screenerDates={screenerDates}
+                        minDate={parseResult.minDate}
+                        maxDate={parseResult.maxDate}
+                        testId="input-start-date"
+                      />
+                      <ScreenerDatePicker
+                        label="End Date"
+                        value={endDate}
+                        onChange={setEndDate}
+                        screenerDates={screenerDates}
+                        minDate={parseResult.minDate}
+                        maxDate={parseResult.maxDate}
+                        testId="input-end-date"
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="csv-history-months" className="font-mono text-xs text-muted-foreground uppercase tracking-widest">Chart History</Label>
@@ -517,18 +551,32 @@ export default function Home() {
                   </div>
 
                   <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 font-mono text-sm text-center">
-                    <span className="text-primary font-bold text-lg">{filteredStocks.length}</span>
-                    <span className="text-muted-foreground ml-2">stocks in selected date range</span>
+                    {useAllStocks ? (
+                      <>
+                        <span className="text-primary font-bold text-lg">{parseResult.stocks.length}</span>
+                        <span className="text-muted-foreground ml-2">total stocks in CSV</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-primary font-bold text-lg">{filteredStocks.length}</span>
+                        <span className="text-muted-foreground ml-2">stocks in selected date range</span>
+                      </>
+                    )}
                   </div>
 
-                  <Button 
-                    onClick={handleGenerateCsv} 
-                    disabled={generateCsvMutation.isPending || !startDate || !endDate || filteredStocks.length === 0}
+                  <Button
+                    onClick={handleGenerateCsv}
+                    disabled={
+                      generateCsvMutation.isPending ||
+                      (useAllStocks ? parseResult.stocks.length === 0 : (!startDate || !endDate || filteredStocks.length === 0))
+                    }
                     className="w-full font-mono font-bold h-12"
                     data-testid="button-generate-csv"
                   >
                     {generateCsvMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                    GENERATE PDF ({filteredStocks.length} STOCKS)
+                    {useAllStocks
+                      ? `GENERATE PDF (ALL ${parseResult.stocks.length} STOCKS)`
+                      : `GENERATE PDF (${filteredStocks.length} STOCKS)`}
                   </Button>
                 </div>
               )}
