@@ -128,6 +128,58 @@ paths:
         "404":
           description: Job not found
 
+  /jobs/{jobId}/charts:
+    get:
+      operationId: listJobCharts
+      tags: [jobs]
+      summary: List chart images generated for a completed job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Chart index
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChartSummary"
+        "400":
+          description: Job is not complete
+        "404":
+          description: Job or chart index not found
+
+  /jobs/{jobId}/charts/{symbol}:
+    get:
+      operationId: getJobChart
+      tags: [jobs]
+      summary: Download one generated chart image
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PNG chart image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Job or chart not found
+
 components:
   schemas:
     HealthStatus:
@@ -234,7 +286,36 @@ components:
         historyMonths:
           type: integer
           default: 6
+        stocksByDate:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
       required:
         - stocks
         - startDate
         - endDate
+
+    ChartSummary:
+      type: object
+      properties:
+        symbol:
+          type: string
+        name:
+          type: string
+        lastClose:
+          type: number
+        chgPct:
+          type: number
+        high52w:
+          type: number
+        low52w:
+          type: number
+      required:
+        - symbol
+        - name
+        - lastClose
+        - chgPct
+        - high52w
+        - low52w

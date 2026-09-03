@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
@@ -56,57 +56,55 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  /* Dark Terminal Theme */
-  --background: 224 71% 4%;
-  --foreground: 213 31% 91%;
+  /* Market Tape Theme — ink navy, saffron signal, seafoam up-candle */
+  --background: 222 38% 8%;
+  --foreground: 42 38% 94%;
 
-  --border: 216 34% 17%;
-  --input: 216 34% 17%;
-  --ring: 172 90% 50%;
+  --border: 220 26% 21%;
+  --input: 220 26% 21%;
+  --ring: 43 94% 61%;
 
-  --card: 224 71% 4%;
-  --card-foreground: 213 31% 91%;
-  --card-border: 216 34% 17%;
+  --card: 222 35% 11%;
+  --card-foreground: 42 38% 94%;
+  --card-border: 220 26% 21%;
 
-  --popover: 224 71% 4%;
-  --popover-foreground: 213 31% 91%;
-  --popover-border: 216 34% 17%;
+  --popover: 222 35% 11%;
+  --popover-foreground: 42 38% 94%;
+  --popover-border: 220 26% 21%;
 
-  /* Cyan accent for primary */
-  --primary: 172 90% 50%;
-  --primary-foreground: 224 71% 4%;
+  --primary: 43 94% 61%;
+  --primary-foreground: 222 38% 8%;
 
-  --secondary: 216 34% 17%;
-  --secondary-foreground: 210 40% 98%;
+  --secondary: 220 26% 17%;
+  --secondary-foreground: 42 38% 94%;
 
-  --muted: 216 34% 17%;
-  --muted-foreground: 215 20.2% 65.1%;
+  --muted: 220 26% 17%;
+  --muted-foreground: 219 13% 63%;
 
-  --accent: 216 34% 17%;
-  --accent-foreground: 210 40% 98%;
+  --accent: 169 47% 42%;
+  --accent-foreground: 42 38% 94%;
 
-  /* Red for destructive */
-  --destructive: 350 89% 60%;
-  --destructive-foreground: 210 40% 98%;
+  --destructive: 4 78% 62%;
+  --destructive-foreground: 42 38% 94%;
 
-  --chart-1: 172 90% 50%;
-  --chart-2: 350 89% 60%;
-  --chart-3: 43 96% 56%;
-  --chart-4: 217 91% 60%;
-  --chart-5: 280 65% 60%;
+  --chart-1: 43 94% 61%;
+  --chart-2: 169 47% 42%;
+  --chart-3: 4 78% 62%;
+  --chart-4: 199 65% 56%;
+  --chart-5: 29 80% 58%;
 
-  --sidebar: 224 71% 6%;
-  --sidebar-foreground: 213 31% 91%;
-  --sidebar-border: 216 34% 17%;
-  --sidebar-primary: 172 90% 50%;
-  --sidebar-primary-foreground: 224 71% 4%;
-  --sidebar-accent: 216 34% 17%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-ring: 172 90% 50%;
+  --sidebar: 222 42% 7%;
+  --sidebar-foreground: 42 38% 94%;
+  --sidebar-border: 220 26% 19%;
+  --sidebar-primary: 43 94% 61%;
+  --sidebar-primary-foreground: 222 38% 8%;
+  --sidebar-accent: 220 26% 17%;
+  --sidebar-accent-foreground: 42 38% 94%;
+  --sidebar-ring: 43 94% 61%;
 
-  --app-font-sans: 'Inter', sans-serif;
-  --app-font-mono: 'JetBrains Mono', monospace;
-  --radius: 0.3rem;
+  --app-font-sans: 'DM Sans', sans-serif;
+  --app-font-mono: 'Space Mono', monospace;
+  --radius: 0.45rem;
 
   --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
   --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
@@ -129,7 +127,7 @@
 }
 
 .dark {
-  /* Same dark theme */
+  /* The workbench is intentionally dark: designed for long chart-review sessions. */
 }
 
 @layer base {
@@ -139,5 +137,37 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 14% 0%, hsl(43 94% 61% / 0.055), transparent 26rem),
+      radial-gradient(circle at 88% 40%, hsl(169 47% 42% / 0.045), transparent 30rem);
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");
+    z-index: 20;
   }
 }
+
+@keyframes tape-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tape-in {
+  animation: tape-in 380ms ease-out both;
+}
+
+.chart-frame {
+  background:
+    linear-gradient(135deg, hsl(222 35% 13%), hsl(222 38% 8%));
+  box-shadow: 0 18px 44px hsl(222 55% 3% / 0.36);
+}
+
+.scrollbar-market::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-market::-webkit-scrollbar-track { background: hsl(var(--muted) / .35); }
+.scrollbar-market::-webkit-scrollbar-thumb { background: hsl(var(--primary) / .45); border-radius: 99px; }

@@ -22,11 +22,13 @@ const WORKSPACE_ROOT = existsSync(resolve(process.cwd(), "pnpm-workspace.yaml"))
 const OUTPUT_DIR = resolve(WORKSPACE_ROOT, "output");
 const SCRIPTS_DIR = resolve(WORKSPACE_ROOT, "python_scripts");
 const UPLOADS_DIR = resolve(WORKSPACE_ROOT, "tmp_uploads");
+const CHARTS_DIR = resolve(WORKSPACE_ROOT, "chart_cache");
 
 const MPL_CACHE_DIR = resolve(WORKSPACE_ROOT, ".mpl_cache");
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
 mkdirSync(UPLOADS_DIR, { recursive: true });
+mkdirSync(CHARTS_DIR, { recursive: true });
 mkdirSync(MPL_CACHE_DIR, { recursive: true });
 
 // ── Persistent Python worker ──────────────────────────────────────────────────
@@ -184,6 +186,7 @@ interface Job {
   completedAt: string | null;
   stockCount: number | null;
   outputFile?: string;
+  chartDir?: string;
 }
 
 const jobs = new Map<string, Job>();
@@ -252,6 +255,7 @@ router.post("/jobs/generate-all", async (req, res): Promise<void> => {
   const today = new Date().toISOString().slice(0, 10);
   const safeFilter = letterFilter.replace(/[^A-Z\-]/g, "") || "ALL";
   const outFile = join(OUTPUT_DIR, `NSE_${safeFilter}_${today}_${jobId}.pdf`);
+  const chartDir = join(CHARTS_DIR, jobId);
   const label = letterFilter === "ALL" ? "NSE All Stocks — EOD Charts" : `NSE Stocks ${letterFilter} — EOD Charts`;
 
   const job: Job = {
@@ -265,7 +269,9 @@ router.post("/jobs/generate-all", async (req, res): Promise<void> => {
     completedAt: null,
     stockCount: null,
     outputFile: outFile,
+    chartDir,
   };
+  mkdirSync(chartDir, { recursive: true });
 
   jobs.set(jobId, job);
   req.log.info({ jobId, historyMonths, letterFilter }, "Starting all-NSE generation job");
@@ -276,6 +282,7 @@ router.post("/jobs/generate-all", async (req, res): Promise<void> => {
     historyMonths,
     label,
     letters: letterFilter !== "ALL" ? letterFilter : "",
+    chartDir,
   };
 
   submitJobToWorker(job, spec);
@@ -417,6 +424,7 @@ router.post("/jobs/generate-csv", async (req, res): Promise<void> => {
   const jobId = makeJobId();
   const today = new Date().toISOString().slice(0, 10);
   const outFile = join(OUTPUT_DIR, `NSE_CSV_${today}_${jobId}.pdf`);
+  const chartDir = join(CHARTS_DIR, jobId);
 
   const job: Job = {
     jobId,
@@ -429,7 +437,9 @@ router.post("/jobs/generate-csv", async (req, res): Promise<void> => {
     completedAt: null,
     stockCount: null,
     outputFile: outFile,
+    chartDir,
   };
+  mkdirSync(chartDir, { recursive: true });
 
   jobs.set(jobId, job);
   req.log.info({ jobId, stockCount: stocks.length, startDate, endDate }, "Starting CSV-filtered generation job");
@@ -448,6 +458,7 @@ router.post("/jobs/generate-csv", async (req, res): Promise<void> => {
     historyMonths,
     label: `NSE Screener Charts — ${startDate} to ${endDate}`,
     screenerDatesFile,
+    chartDir,
   };
 
   submitJobToWorker(job, spec);
@@ -471,6 +482,53 @@ router.get("/jobs/:jobId", async (req, res): Promise<void> => {
 
   const { outputFile: _of, ...rest } = job;
   res.json(GetJobResponse.parse(rest));
+});
+
+router.get("/jobs/:jobId/charts", async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params["jobId"]) ? req.params["jobId"][0] : req.params["jobId"];
+  const job = jobs.get(raw);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  if (job.status !== "completed" || !job.chartDir) {
+    res.status(400).json({ error: "Charts are not ready yet" });
+    return;
+  }
+
+  const manifestPath = join(job.chartDir, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    res.status(404).json({ error: "Chart index not found" });
+    return;
+  }
+
+  try {
+    res.json(JSON.parse(readFileSync(manifestPath, "utf-8")));
+  } catch (err) {
+    req.log.error({ err, jobId: raw }, "Could not read chart manifest");
+    res.status(500).json({ error: "Could not read chart index" });
+  }
+});
+
+router.get("/jobs/:jobId/charts/:symbol", async (req, res): Promise<void> => {
+  const rawJobId = Array.isArray(req.params["jobId"]) ? req.params["jobId"][0] : req.params["jobId"];
+  const rawSymbol = Array.isArray(req.params["symbol"]) ? req.params["symbol"][0] : req.params["symbol"];
+  const job = jobs.get(rawJobId);
+  if (!job || !job.chartDir) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  const symbol = decodeURIComponent(rawSymbol).toUpperCase().replace(/[^A-Z0-9&.\-]/g, "");
+  const chartPath = join(job.chartDir, `${symbol}.png`);
+  if (!existsSync(chartPath)) {
+    res.status(404).json({ error: "Chart not found" });
+    return;
+  }
+
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  createReadStream(chartPath).pipe(res);
 });
 
 router.get("/jobs/:jobId/download", async (req, res): Promise<void> => {

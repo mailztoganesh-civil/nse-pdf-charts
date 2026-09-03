@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ChartSummary,
   CsvParseResult,
   GenerateAllRequest,
   GenerateCsvRequest,
@@ -502,6 +503,184 @@ export function useGetJob<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetJobQueryOptions(jobId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List chart images generated for a completed job
+ */
+export const getListJobChartsUrl = (jobId: string) => {
+  return `/api/jobs/${jobId}/charts`;
+};
+
+export const listJobCharts = async (
+  jobId: string,
+  options?: RequestInit,
+): Promise<ChartSummary[]> => {
+  return customFetch<ChartSummary[]>(getListJobChartsUrl(jobId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListJobChartsQueryKey = (jobId: string) => {
+  return [`/api/jobs/${jobId}/charts`] as const;
+};
+
+export const getListJobChartsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listJobCharts>>,
+  TError = ErrorType<void>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listJobCharts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListJobChartsQueryKey(jobId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listJobCharts>>> = ({
+    signal,
+  }) => listJobCharts(jobId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!jobId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listJobCharts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListJobChartsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listJobCharts>>
+>;
+export type ListJobChartsQueryError = ErrorType<void>;
+
+/**
+ * @summary List chart images generated for a completed job
+ */
+
+export function useListJobCharts<
+  TData = Awaited<ReturnType<typeof listJobCharts>>,
+  TError = ErrorType<void>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listJobCharts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListJobChartsQueryOptions(jobId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download one generated chart image
+ */
+export const getGetJobChartUrl = (jobId: string, symbol: string) => {
+  return `/api/jobs/${jobId}/charts/${symbol}`;
+};
+
+export const getJobChart = async (
+  jobId: string,
+  symbol: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetJobChartUrl(jobId, symbol), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetJobChartQueryKey = (jobId: string, symbol: string) => {
+  return [`/api/jobs/${jobId}/charts/${symbol}`] as const;
+};
+
+export const getGetJobChartQueryOptions = <
+  TData = Awaited<ReturnType<typeof getJobChart>>,
+  TError = ErrorType<void>,
+>(
+  jobId: string,
+  symbol: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getJobChart>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetJobChartQueryKey(jobId, symbol);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getJobChart>>> = ({
+    signal,
+  }) => getJobChart(jobId, symbol, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(jobId && symbol),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getJobChart>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetJobChartQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getJobChart>>
+>;
+export type GetJobChartQueryError = ErrorType<void>;
+
+/**
+ * @summary Download one generated chart image
+ */
+
+export function useGetJobChart<
+  TData = Awaited<ReturnType<typeof getJobChart>>,
+  TError = ErrorType<void>,
+>(
+  jobId: string,
+  symbol: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getJobChart>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetJobChartQueryOptions(jobId, symbol, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

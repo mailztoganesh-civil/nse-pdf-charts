@@ -1,15 +1,16 @@
-import { useListJobs } from "@workspace/api-client-react";
+import { useListJobs, getListJobsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import { Download, Loader2, AlertCircle } from "lucide-react";
-import type { Job } from "@workspace/api-client-react/src/generated/api.schemas";
+import type { Job } from "@workspace/api-client-react";
 
 export default function Jobs() {
   const { data: jobs, isLoading, isError } = useListJobs({
     query: {
+      queryKey: getListJobsQueryKey(),
       refetchInterval: 5000 // refresh every 5s to catch job updates
     }
   });
@@ -37,6 +38,7 @@ export default function Jobs() {
       case 'failed': return <Badge variant="destructive" className="bg-destructive/20 text-destructive hover:bg-destructive/30 border-none rounded-sm">FAILED</Badge>;
       case 'running': return <Badge variant="secondary" className="bg-primary/20 text-primary border-none rounded-sm animate-pulse">RUNNING</Badge>;
       case 'pending': return <Badge variant="outline" className="border-muted-foreground text-muted-foreground rounded-sm">PENDING</Badge>;
+      default: return null;
     }
   };
 

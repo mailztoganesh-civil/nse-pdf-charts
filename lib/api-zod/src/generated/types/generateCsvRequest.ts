@@ -5,10 +5,12 @@
  * NSE PDF Chart Generator API
  * OpenAPI spec version: 0.1.0
  */
+import type { GenerateCsvRequestStocksByDate } from "./generateCsvRequestStocksByDate";
 
 export interface GenerateCsvRequest {
   stocks: string[];
   startDate: string;
   endDate: string;
   historyMonths?: number;
+  stocksByDate?: GenerateCsvRequestStocksByDate;
 }

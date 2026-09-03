@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,8 +10,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useToast } from "@/hooks/use-toast";
 import { useGenerateAllNse, useGenerateFromCsv, useGetJob, getGetJobQueryKey } from "@workspace/api-client-react";
 import { UploadCloud, File, Play, Download, AlertCircle, CheckCircle2, Loader2, CalendarIcon } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import type { Job, CsvParseResult } from "@workspace/api-client-react/src/generated/api.schemas";
+import { motion } from "framer-motion";
+import type { CsvParseResult, GenerateCsvRequest } from "@workspace/api-client-react";
+import { ChartReview } from "@/components/chart-review";
 
 function ScreenerDatePicker({
   label,
@@ -104,8 +104,7 @@ function ScreenerDatePicker({
 }
 
 function ActiveJobView({ jobId, onReset }: { jobId: string, onReset: () => void }) {
-  const queryClient = useQueryClient();
-  const { data: job, isLoading } = useGetJob(jobId, {
+  const { data: job, isLoading, isError, refetch } = useGetJob(jobId, {
     query: {
       queryKey: getGetJobQueryKey(jobId),
       refetchInterval: (query) => {
@@ -115,13 +114,37 @@ function ActiveJobView({ jobId, onReset }: { jobId: string, onReset: () => void 
     }
   });
 
-  if (isLoading || !job) {
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="space-y-4 p-8" data-testid="state-job-loading">
+        <div className="mx-auto h-16 w-16 animate-pulse rounded-full bg-muted" />
+        <div className="mx-auto h-5 w-48 animate-pulse rounded bg-muted" />
+        <div className="mx-auto h-3 w-64 animate-pulse rounded bg-muted/70" />
       </div>
     );
   }
+
+  if (isError) {
+    return (
+      <div className="p-8 text-center" data-testid="state-job-error">
+        <AlertCircle className="mx-auto h-9 w-9 text-destructive" />
+        <h3 className="mt-4 font-mono text-lg font-bold">Job status unavailable</h3>
+        <p className="mx-auto mt-2 max-w-sm font-mono text-xs leading-relaxed text-muted-foreground">
+          We could not read this generation job. Nothing has been deleted.
+        </p>
+        <div className="mt-5 flex justify-center gap-2">
+          <Button variant="outline" onClick={() => refetch()} className="font-mono text-xs" data-testid="button-retry-job">
+            TRY AGAIN
+          </Button>
+          <Button variant="ghost" onClick={onReset} className="font-mono text-xs" data-testid="button-reset-error">
+            Back to generator
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!job) return null;
 
   const isRunning = job.status === "pending" || job.status === "running";
   const isFailed = job.status === "failed";
@@ -134,7 +157,7 @@ function ActiveJobView({ jobId, onReset }: { jobId: string, onReset: () => void 
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
-      <div className="flex flex-col items-center text-center space-y-4 py-8">
+      <div className={`flex flex-col items-center text-center space-y-4 ${isCompleted ? "py-3" : "py-8"}`}>
         {isRunning && (
           <>
             <div className="relative w-24 h-24 flex items-center justify-center rounded-full bg-primary/10 mb-4">
@@ -150,14 +173,14 @@ function ActiveJobView({ jobId, onReset }: { jobId: string, onReset: () => void 
         
         {isCompleted && (
           <>
-            <div className="w-24 h-24 flex items-center justify-center rounded-full bg-green-500/20 mb-4 text-green-500">
+            <div className="w-24 h-24 flex items-center justify-center rounded-full bg-[hsl(var(--accent)/.16)] mb-4 text-[hsl(var(--accent))]">
               <CheckCircle2 className="w-12 h-12" />
             </div>
-            <h3 className="text-xl font-mono font-bold text-green-400">Generation Complete</h3>
+            <h3 className="text-xl font-mono font-bold text-[hsl(var(--accent))]">Generation Complete</h3>
             <p className="text-muted-foreground font-mono text-sm max-w-md">
-              Processed {job.total} stocks successfully.
+              {job.stockCount ?? job.total} stocks processed. Your chart book is ready to review.
             </p>
-            <div className="mt-8 pt-4">
+            <div className="mt-3">
               <a 
                 href={`/api/jobs/${job.jobId}/download`}
                 download
@@ -200,6 +223,10 @@ function ActiveJobView({ jobId, onReset }: { jobId: string, onReset: () => void 
             Start New Job
           </Button>
         </div>
+      )}
+
+      {isCompleted && (
+        <ChartReview jobId={job.jobId} stockCount={job.stockCount ?? job.total} />
       )}
     </motion.div>
   );
@@ -318,7 +345,7 @@ export default function Home() {
 
     generateCsvMutation.mutate(
       { 
-        data: { 
+        data: {
           stocks: stocksToUse,
           startDate: effectiveStart,
           endDate:   effectiveEnd,
@@ -332,7 +359,7 @@ export default function Home() {
                   )
                 )
               : undefined,
-        } 
+        } as GenerateCsvRequest & { stocksByDate?: CsvParseResult["stocksByDate"] }
       },
       {
         onSuccess: (job) => {
@@ -351,7 +378,7 @@ export default function Home() {
 
   if (activeJobId) {
     return (
-      <div className="max-w-4xl mx-auto pt-8">
+      <div className="mx-auto max-w-6xl pt-2">
         <Card className="border-primary/20 bg-card">
           <CardContent className="p-6">
             <ActiveJobView jobId={activeJobId} onReset={() => setActiveJobId(null)} />

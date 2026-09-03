@@ -587,14 +587,17 @@ def _render_worker(args):
 
 
 def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stock Charts",
-                 sym_screener_dates=None):
+                 sym_screener_dates=None, chart_dir=None):
     """
     Generate PDF for a list of (yf_symbol, nse_symbol, name) tuples.
     Emits JSON progress lines to stdout.
     """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    if chart_dir:
+        os.makedirs(chart_dir, exist_ok=True)
     total  = len(symbol_list)
     chart_data = []
+    chart_manifest = []
     failed = []
     done   = 0
 
@@ -651,6 +654,9 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                       (sym_screener_dates or {}).get(sym_yf)
             img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df,
                                  screener_dates=s_dates)
+            if chart_dir:
+                with open(os.path.join(chart_dir, f"{sym_nse}.png"), "wb") as chart_file:
+                    chart_file.write(img_buf.getvalue())
             chart_data.append({
                 "symbol"    : sym_nse,
                 "name"      : name,
@@ -659,6 +665,14 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                 "chg_pct"   : round(chg_pct, 2),
                 "high_52w"  : round(float(highs.max()), 2),
                 "low_52w"   : round(float(lows.min()), 2),
+            })
+            chart_manifest.append({
+                "symbol": sym_nse,
+                "name": name,
+                "lastClose": round(float(closes[-1]), 2),
+                "chgPct": round(chg_pct, 2),
+                "high52w": round(float(highs.max()), 2),
+                "low52w": round(float(lows.min()), 2),
             })
             emit({"type": "progress", "done": done, "total": total,
                   "message": f"Charted {sym_nse}", "symbol": sym_nse})
@@ -681,6 +695,9 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                               (sym_screener_dates or {}).get(sym_yf)
                     img_buf = draw_chart(sym_yf, name, df, nifty_df=nifty_df,
                                         screener_dates=s_dates)
+                    if chart_dir:
+                        with open(os.path.join(chart_dir, f"{sym_nse}.png"), "wb") as chart_file:
+                            chart_file.write(img_buf.getvalue())
                     chart_data.append({
                         "symbol"    : sym_nse,
                         "name"      : name,
@@ -690,12 +707,24 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
                         "high_52w"  : round(float(highs.max()), 2),
                         "low_52w"   : round(float(lows.min()), 2),
                     })
+                    chart_manifest.append({
+                        "symbol": sym_nse,
+                        "name": name,
+                        "lastClose": round(float(closes[-1]), 2),
+                        "chgPct": round(chg_pct, 2),
+                        "high52w": round(float(highs.max()), 2),
+                        "low52w": round(float(lows.min()), 2),
+                    })
                 time.sleep(3)
             except Exception:
                 pass
 
     if chart_data:
         chart_data.sort(key=lambda x: x['symbol'])
+        if chart_dir:
+            chart_manifest.sort(key=lambda x: x["symbol"])
+            with open(os.path.join(chart_dir, "manifest.json"), "w", encoding="utf-8") as manifest_file:
+                json.dump(chart_manifest, manifest_file)
         emit({"type": "building_pdf", "done": total, "total": total,
               "message": f"Building PDF for {len(chart_data)} charts..."})
         build_pdf(chart_data, output_path, pdf_label)
@@ -730,6 +759,7 @@ def _run_job(spec):
     history_months = spec.get("historyMonths", 6)
     label          = spec.get("label", "NSE Stock Charts")
     screener_file  = spec.get("screenerDatesFile", "")
+    chart_dir      = spec.get("chartDir", "")
     sym_screener_dates = _load_screener_dates_file(screener_file)
 
     if mode == "all":
@@ -747,7 +777,8 @@ def _run_job(spec):
         emit({"type": "progress", "done": 0, "total": len(symbol_list),
               "message": f"Found {len(symbol_list)} NSE symbols"})
         run_generate(symbol_list, output_path, history_months, label,
-                     sym_screener_dates=sym_screener_dates or None)
+                     sym_screener_dates=sym_screener_dates or None,
+                     chart_dir=chart_dir)
     else:
         syms = [s.strip().upper() for s in spec.get("symbols", "").split(',') if s.strip()]
         if not syms:
@@ -755,7 +786,8 @@ def _run_job(spec):
             return
         symbol_list = [(f"{s}.NS", s, s) for s in syms]
         run_generate(symbol_list, output_path, history_months, label,
-                     sym_screener_dates=sym_screener_dates or None)
+                     sym_screener_dates=sym_screener_dates or None,
+                     chart_dir=chart_dir)
 
 
 def worker_loop():
@@ -810,6 +842,7 @@ def main():
         "letters"           : args.letters,
         "symbols"           : args.symbols,
         "screenerDatesFile" : args.screener_dates_file,
+        "chartDir"          : "",
     }
     _run_job(spec)
 

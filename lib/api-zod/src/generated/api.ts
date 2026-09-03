@@ -92,3 +92,28 @@ export const GetJobResponse = zod.object({
   completedAt: zod.string().nullable(),
   stockCount: zod.number().nullable(),
 });
+
+/**
+ * @summary List chart images generated for a completed job
+ */
+export const ListJobChartsParams = zod.object({
+  jobId: zod.coerce.string(),
+});
+
+export const ListJobChartsResponseItem = zod.object({
+  symbol: zod.string(),
+  name: zod.string(),
+  lastClose: zod.number(),
+  chgPct: zod.number(),
+  high52w: zod.number(),
+  low52w: zod.number(),
+});
+export const ListJobChartsResponse = zod.array(ListJobChartsResponseItem);
+
+/**
+ * @summary Download one generated chart image
+ */
+export const GetJobChartParams = zod.object({
+  jobId: zod.coerce.string(),
+  symbol: zod.coerce.string(),
+});

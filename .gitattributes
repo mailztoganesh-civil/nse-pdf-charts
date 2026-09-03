@@ -6,3 +6,4 @@ output/NSE_CSV_2026-04-25_job_1777099462104_1659s5.pdf filter=lfs diff=lfs merge
 output/NSE_CSV_2026-05-10_job_1778392082788_1f8p4g.pdf filter=lfs diff=lfs merge=lfs -text
 output/NSE_CSV_2026-05-10_job_1778397485346_328jvn.pdf filter=lfs diff=lfs merge=lfs -text
 output/NSE_CSV_2026-05-10_job_1778400087045_lsqrac.pdf filter=lfs diff=lfs merge=lfs -text
+output/NSE_CSV_2026-07-13_job_1783950533259_4vr15p.pdf filter=lfs diff=lfs merge=lfs -text

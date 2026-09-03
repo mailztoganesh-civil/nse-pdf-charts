@@ -56,12 +56,23 @@ export interface CsvParseResult {
   totalRows: number;
 }
 
+export type GenerateCsvRequestStocksByDate = { [key: string]: string[] };
+
 export interface GenerateCsvRequest {
   stocks: string[];
   startDate: string;
   endDate: string;
   historyMonths?: number;
-  stocksByDate?: { [key: string]: string[] };
+  stocksByDate?: GenerateCsvRequestStocksByDate;
+}
+
+export interface ChartSummary {
+  symbol: string;
+  name: string;
+  lastClose: number;
+  chgPct: number;
+  high52w: number;
+  low52w: number;
 }
 
 export type ParseCsvBody = {
