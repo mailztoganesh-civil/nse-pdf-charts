@@ -1,6 +1,7 @@
 # NSE Charts Android app
 
-This is a GitHub-ready Android Studio project for the NSE PDF Chart Generator.
+This folder is a complete, standalone Android Studio project for the NSE PDF
+Chart Generator. It does not depend on the web application's source code.
 It connects to the existing application API at `https://lsib.replit.app/api`.
 
 ## Features
@@ -13,10 +14,23 @@ It connects to the existing application API at `https://lsib.replit.app/api`.
 
 ## Open and run
 
-1. Download or clone this repository.
-2. Open the `android-app` folder in Android Studio.
-3. Let Android Studio sync Gradle.
-4. Run the `app` configuration on an Android phone or emulator.
+1. Create a new GitHub repository.
+2. Upload the contents of this folder to the repository root.
+3. Open the repository root in Android Studio.
+4. Let Android Studio sync Gradle.
+5. Run the `app` configuration on an Android phone or emulator.
+
+If using Git locally:
+
+```bash
+cd android-app
+git init
+git add .
+git commit -m "Initial NSE Charts Android app"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
+git push -u origin main
+```
 
 The server must be running or published at the API URL in
 `app/src/main/java/com/nsecharts/android/MainActivity.kt`. If you publish the
