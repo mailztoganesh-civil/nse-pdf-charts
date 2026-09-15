@@ -191,8 +191,7 @@ def fetch_batch(symbols_yf, months=6):
                 if not raw.empty:
                     # Single-ticker: yfinance returns multi-level columns (Ticker, Price)
                     # Flatten to single-level (Open, High, Low, Close, Volume)
-                    if isinstance(raw.columns, pd.MultiIndex):
-                        raw.columns = raw.columns.get_level_values(1)
+                    raw = flatten_yfinance_columns(raw)
                     df = raw.dropna()
                     if len(df) >= 10:
                         results[sym] = df
@@ -208,6 +207,20 @@ def fetch_batch(symbols_yf, months=6):
         except Exception:
             time.sleep(CONFIG["retry_delay_sec"])
     return results
+
+
+def flatten_yfinance_columns(df):
+    """Flatten yfinance columns regardless of MultiIndex level ordering."""
+    if not isinstance(df.columns, pd.MultiIndex):
+        return df
+
+    price_columns = {"Open", "High", "Low", "Close", "Volume"}
+    for level in range(df.columns.nlevels):
+        values = {str(value) for value in df.columns.get_level_values(level)}
+        if price_columns.issubset(values):
+            df.columns = df.columns.get_level_values(level)
+            break
+    return df
 
 
 def compute_ma(arr, window):
@@ -614,8 +627,7 @@ def run_generate(symbol_list, output_path, history_months=6, pdf_label="NSE Stoc
             end=n_end.strftime("%Y-%m-%d"),
             auto_adjust=True, progress=False, timeout=20)
         if not nraw.empty:
-            if isinstance(nraw.columns, pd.MultiIndex):
-                nraw.columns = nraw.columns.get_level_values(1)
+            nraw = flatten_yfinance_columns(nraw)
             nifty_df = nraw
             emit({"type": "progress", "done": 0, "total": total, "message": "NIFTY 50 loaded for RS Line"})
     except Exception:
