@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NSE PDF Charts</title>
+<meta name="theme-color" content="#FFFFFF">
+<style>
+  :root {
+    --ink: #131722; --sec: #787B86; --line: #E0E3EB; --soft: #F0F3FA;
+    --blue: #2962FF; --red: #EF5350; --orange: #FF6D00;
+    --sans: Helvetica, Arial, sans-serif;
+    --mono: Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: var(--ink); font: 16px/1.5 var(--sans); -webkit-text-size-adjust: 100%; }
+  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 64px; }
+  h1 { font: bold 34px/1.1 var(--mono); letter-spacing: -0.5px; margin: 0 0 6px; }
+  .lede { color: var(--sec); margin: 0 0 28px; max-width: 60ch; }
+  section { border-top: 1px solid var(--line); padding: 20px 0; }
+  h2 { font-size: 15px; font-weight: bold; margin: 0 0 10px; }
+  .hint { color: var(--sec); font-size: 14px; margin: 6px 0 0; }
+  input[type=text] {
+    width: 100%; font: 16px var(--sans); color: var(--ink); padding: 11px 12px;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(41,98,255,.15); }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible, label:focus-within { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .field { position: relative; }
+  #suggest {
+    position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px 0;
+    list-style: none; background: #fff; border: 1px solid var(--line); border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(19,23,34,.08); max-height: 320px; overflow: auto;
+  }
+  #suggest li { padding: 8px 12px; display: flex; gap: 12px; align-items: baseline; cursor: pointer; }
+  #suggest li b { font-family: var(--mono); font-size: 14px; min-width: 9ch; }
+  #suggest li span { color: var(--sec); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #suggest li:hover, #suggest li.active { background: var(--soft); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row input[type=text] { flex: 1 1 160px; width: auto; }
+  .btn {
+    border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 6px;
+    padding: 10px 14px; font-size: 15px; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--sec); }
+  .link { background: none; border: 0; color: var(--sec); padding: 0; font-size: 14px; text-decoration: underline; }
+  .chips-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; }
+  #symCount { font-size: 14px; color: var(--sec); }
+  #chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 2px; font: 13px var(--mono);
+    border: 1px solid var(--line); border-radius: 4px; padding: 3px 2px 3px 8px; background: var(--soft);
+  }
+  .chip.has-dates::before { content: "\25B2"; color: var(--orange); font-size: 10px; margin-right: 4px; }
+  .chip button { border: 0; background: none; color: var(--sec); font-size: 16px; line-height: 1; padding: 0 6px; }
+  .chip button:hover { color: var(--red); }
+  .more { font-size: 13px; color: var(--sec); align-self: center; }
+  .file-btn { position: relative; overflow: hidden; display: inline-block; }
+  .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  #csvNote { min-height: 0; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; background: #fff; padding: 9px 18px; font: 15px var(--mono); color: var(--sec); }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed=true] { background: var(--ink); color: #fff; }
+  .opts { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: end; }
+  @media (max-width: 520px) { .opts { grid-template-columns: 1fr; } }
+  #generate {
+    width: 100%; margin-top: 4px; padding: 15px; font: bold 17px var(--sans); color: #fff;
+    background: var(--blue); border: 0; border-radius: 6px;
+  }
+  #generate:disabled { background: #B8C6F5; cursor: default; }
+  #progress { margin-top: 18px; }
+  .track { height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; }
+  #bar { height: 100%; width: 0; background: var(--blue); transition: width .2s; }
+  #statusText { font: 14px var(--mono); color: var(--sec); margin: 8px 0 0; }
+  #failed { font-size: 14px; color: var(--red); margin: 8px 0 0; }
+  #preview { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; margin-top: 14px; }
+  #downloads { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  .dl { color: var(--blue); font-weight: bold; text-decoration: none; padding: 12px 14px; border: 1px solid var(--blue); border-radius: 6px; }
+  footer { color: var(--sec); font-size: 13px; margin-top: 32px; }
+  @media (prefers-reduced-motion: reduce) { #bar { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>NSE PDF Charts</h1>
+  <p class="lede">Candlestick charts for any NSE stock, with MA 10/21/50, RS line vs NIFTY 50 and volume, saved as a landscape A4 PDF.</p>
+
+  <section>
+    <h2>Stocks</h2>
+    <div class="field">
+      <input type="text" id="symInput" placeholder="Type a symbol or company, or paste a list" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Add stock">
+      <ul id="suggest" hidden></ul>
+    </div>
+    <p class="hint">Press Enter to add. Pasting "TCS, INFY, SBIN" adds all three.</p>
+
+    <div class="row" style="margin-top:14px">
+      <input type="text" id="letters" placeholder="First letters, e.g. A, B" aria-label="Add all stocks starting with" autocapitalize="characters">
+      <button class="btn" id="addLetters" type="button">Add all starting with</button>
+      <label class="btn file-btn">Import screener CSV<input type="file" id="csvFile" accept=".csv,text/csv"></label>
+    </div>
+    <p class="hint" id="csvNote"></p>
+
+    <div class="chips-head">
+      <span id="symCount">No stocks added</span>
+      <button class="link" id="clearBtn" type="button" hidden>Clear all</button>
+    </div>
+    <div id="chips"></div>
+  </section>
+
+  <section class="opts">
+    <div>
+      <h2>History</h2>
+      <div class="seg" id="months" role="group" aria-label="History">
+        <button type="button" data-m="3" aria-pressed="false">3M</button>
+        <button type="button" data-m="6" aria-pressed="true">6M</button>
+        <button type="button" data-m="12" aria-pressed="false">1Y</button>
+      </div>
+    </div>
+    <div>
+      <h2><label for="pdfTitle">PDF title</label></h2>
+      <input type="text" id="pdfTitle" value="NSE Stock Charts">
+    </div>
+  </section>
+
+  <section>
+    <button id="generate" type="button" disabled>Generate PDF</button>
+    <div id="progress" hidden>
+      <div class="track"><div id="bar"></div></div>
+      <p id="statusText"></p>
+      <p id="failed" hidden></p>
+      <canvas id="preview" width="870" height="500" hidden></canvas>
+      <div id="downloads"></div>
+    </div>
+  </section>
+
+  <footer>Data: Yahoo Finance end-of-day, via nse-charts-proxy. Large lists are split into PDFs of 200 charts.</footer>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="symbols.js"></script>
+<script src="chart.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
